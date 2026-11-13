@@ -1,0 +1,16 @@
+# CubeIDE derleme çıktıları
+Debug/
+Release/
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.list
+*.bin
+*.hex
+
+# IDE yerel ayarları
+.settings/
+*.launch
