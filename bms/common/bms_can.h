@@ -10,7 +10,7 @@
 #define CAN_ID_EMU_MEAS2   0x102u
 #define CAN_ID_ECU_CTRL    0x201u
 #define CAN_ID_ECU_STATUS  0x202u
-#define CAN_ID_PC_CMD      0x301u
+#define CAN_ID_PC_CMD      0x301u     /* olay mesajı: periyodik değil, zaman aşımı izlenmez */
 
 #define CAN_TIMEOUT_FAULT_MS  250u   /* 2 periyot kaçırıldı -> arıza bayrağı */
 #define CAN_TIMEOUT_SAFE_MS   500u   /* 5 periyot -> SAFE-STOP (CAN_ok = 0) */
@@ -54,6 +54,7 @@ void can_monitor_init(can_monitor_t *mon, uint32_t now_ms);
  * çerçeve reddedilir (0 döner); kayıp çerçeve sayısı n_lost'a eklenir. */
 int  can_monitor_rx(can_monitor_t *mon, uint32_t now_ms, int crc_ok, uint8_t counter);
 /* Periyodik (ör. her 10 ms): zaman aşımı kontrolü. CAN_ok = !mon->safe
+ * Yalnız periyodik mesajlar (0x101, 0x102) için çağrılır; olay mesajı 0x301 için çağrılmaz.
  * İlk geçerli mesajdan önce eşik CAN_TIMEOUT_FIRST_MS'dir (init anından itibaren). */
 void can_monitor_tick(can_monitor_t *mon, uint32_t now_ms);
 

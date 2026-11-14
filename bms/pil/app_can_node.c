@@ -14,7 +14,10 @@
 #include "bsp_can.h"
 #include "bms_can.h"
 
-enum { R_M1, R_M2, R_CMD, N_RX };          /* 0x101, 0x102, 0x301 */
+/* 0x101, 0x102 periyodik (100 ms): CRC + sayaç + zaman aşımı.
+ * 0x301 olay mesajı (PC komutu, ara sıra gelir): yalnız CRC + sayaç, zaman aşımı YOK. */
+enum { R_M1, R_M2, R_CMD, N_RX };
+#define N_PERIODIC  2                       /* R_M1, R_M2: zaman aşımı izlenenler */
 
 static void put_s(const char *s) { bsp_uart_write((const uint8_t *)s, (uint32_t)strlen(s)); }
 static void put_u(uint32_t v)
@@ -58,7 +61,7 @@ void can_node_run(void)
                 if (m < 0) { other++; continue; }               /* filtre doğruysa olmamalı */
                 can_monitor_rx(&mon[m], now_ms, ok, c);
             }
-            for (int m = 0; m < N_RX; m++) can_monitor_tick(&mon[m], now_ms);
+            for (int m = 0; m < N_PERIODIC; m++) can_monitor_tick(&mon[m], now_ms);
         }
 
         if (now_ms % 100u == 0) {
