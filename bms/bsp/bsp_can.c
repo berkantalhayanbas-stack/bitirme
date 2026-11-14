@@ -64,10 +64,12 @@ static void pins_init(void)
     /* MODER = 10 (alternatif fonksiyon), pin n -> bit 2n */
     GPIOA->MODER = (GPIOA->MODER & ~((3u << (11 * 2)) | (3u << (12 * 2))))
                  | (2u << (11 * 2)) | (2u << (12 * 2));
-    /* TX için yüksek hız (kenar dikliği). RX'e pull-up (PUPDR = 01): transceiver takılı değilken
-     * ya da beslemesi yokken pin boşta kalıp gürültüyü dominant bit sanmasın (resesif = 1). */
+    /* TX için yüksek hız (kenar dikliği). İki pinde de pull-up/pull-down YOK (PUPDR = 00):
+     * TJA1050 5 V ile beslenir ve RXD'yi 5 V'a kadar sürer. PA11/PA12 FT_u (5 V toleranslı) ama
+     * veri sayfası (DS12589) VDD + 0,3 V üstünde iç dirençlerin kapalı olmasını şart koşar.
+     * Transceiver RXD'yi her zaman sürdüğü için pull-up'a gerek de yok. */
     GPIOA->OSPEEDR = (GPIOA->OSPEEDR & ~(3u << (12 * 2))) | (2u << (12 * 2));
-    GPIOA->PUPDR = (GPIOA->PUPDR & ~((3u << (11 * 2)) | (3u << (12 * 2)))) | (1u << (11 * 2));
+    GPIOA->PUPDR &= ~((3u << (11 * 2)) | (3u << (12 * 2)));
     /* AFR[1] pin 8..15'i tutar: pin n -> bit 4(n-8) */
     GPIOA->AFR[1] = (GPIOA->AFR[1] & ~((0xFu << ((11 - 8) * 4)) | (0xFu << ((12 - 8) * 4))))
                   | (9u << ((11 - 8) * 4)) | (9u << ((12 - 8) * 4));

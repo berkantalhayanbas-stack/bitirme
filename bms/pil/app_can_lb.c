@@ -8,7 +8,8 @@
  *       ölçek çözünürlüğünün yarısı içinde; izleyici her çerçeveyi kabul eder.
  *   T2  E2E hata enjeksiyonu (CAN üzerinden): bozuk CRC, yanlış kimlik (data ID), donmuş sayaç,
  *       atlanmış sayaç -> izleyici sayaçları beklenen değerde.
- *   T3  Zaman aşımı (sanal zaman): 250 ms -> fault, 500 ms -> safe (kalıcı).
+ *   T3  Zaman aşımı (sanal zaman): 250 ms -> fault, 500 ms -> safe (kalıcı). Açılış: ilk
+ *       mesajdan önce CAN_TIMEOUT_FIRST_MS (2 s) boyunca SAFE yok; hiç mesaj gelmezse 2 s'de SAFE.
  *   T4  FDCAN hata sayaçları sıfır, error passive / bus-off yok.
  *   T5  Normal moddaki kabul filtresi: yalnızca 0x101, 0x102, 0x301 alınır.
  * LED (PA5): PASS -> yavaş (500 ms), FAIL -> hızlı (100 ms) yanıp söner.
@@ -193,6 +194,30 @@ static void t3_timeout(void)
     can_monitor_rx(&mn, 1510, 1, 1);
     can_monitor_tick(&mn, 1520);
     if (!mn.safe) fail("safe not latched", 0, 520);
+
+    /* açılış: ilk mesaj CAN_TIMEOUT_FIRST_MS içinde gelirse SAFE yok */
+    can_monitor_init(&mn, 0);
+    can_monitor_tick(&mn, 600);
+    if (mn.fault || mn.safe) fail("startup: safe before first timeout", 0, 600);
+    can_monitor_tick(&mn, CAN_TIMEOUT_FIRST_MS - 10);
+    if (mn.fault || mn.safe) fail("startup: safe before first timeout", 0, CAN_TIMEOUT_FIRST_MS - 10);
+    can_monitor_rx(&mn, 1500, 1, 7);                 /* ilk mesaj geldi -> normal eşikler */
+    can_monitor_tick(&mn, 1500 + CAN_TIMEOUT_SAFE_MS - 10);
+    if (mn.safe) fail("startup: safe after first msg", 0, 1);
+    can_monitor_tick(&mn, 1500 + CAN_TIMEOUT_SAFE_MS);
+    if (!mn.safe) fail("startup: normal timeout after first msg", 0, 2);
+
+    /* açılış: hiç mesaj gelmezse CAN_TIMEOUT_FIRST_MS'de SAFE */
+    can_monitor_init(&mn, 100);
+    can_monitor_tick(&mn, 100 + CAN_TIMEOUT_FIRST_MS - 1);
+    if (mn.safe) fail("startup: early safe", 0, 3);
+    can_monitor_tick(&mn, 100 + CAN_TIMEOUT_FIRST_MS);
+    if (!mn.fault || !mn.safe) fail("startup: no safe at first timeout", 0, 4);
+    /* açılışta yalnız bozuk (CRC hatalı) mesaj gelmesi açılış süresini uzatmaz */
+    can_monitor_init(&mn, 0);
+    can_monitor_rx(&mn, 500, 0, 0);
+    can_monitor_tick(&mn, CAN_TIMEOUT_FIRST_MS);
+    if (!mn.safe) fail("startup: crc-bad frame extended grace", 0, 5);
 }
 
 /* ---------------------------------------------------------------- T5 */

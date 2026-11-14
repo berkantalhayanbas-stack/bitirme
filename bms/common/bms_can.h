@@ -14,6 +14,10 @@
 
 #define CAN_TIMEOUT_FAULT_MS  250u   /* 2 periyot kaçırıldı -> arıza bayrağı */
 #define CAN_TIMEOUT_SAFE_MS   500u   /* 5 periyot -> SAFE-STOP (CAN_ok = 0) */
+/* Açılış: ilk geçerli mesaj gelene kadar zaman aşımı bu süreyle değerlendirilir (diğer düğümler
+ * açılırken erken SAFE'e kilitlenmemek için; AUTOSAR COM'daki "first timeout" fikri). Süre
+ * dolduğunda hâlâ mesaj yoksa doğrudan fault + SAFE. İlk mesajdan sonra 250/500 ms geçerlidir. */
+#define CAN_TIMEOUT_FIRST_MS 2000u
 
 typedef struct { float V, I, T; } can_meas1_t;
 typedef struct { float V_min, V_max, T_amb; } can_meas2_t;
@@ -49,7 +53,8 @@ void can_monitor_init(can_monitor_t *mon, uint32_t now_ms);
 /* Her alınan çerçevede: crc_ok ve sayaç ile çağrılır. Sayaç beklenen değilse (donma veya atlama)
  * çerçeve reddedilir (0 döner); kayıp çerçeve sayısı n_lost'a eklenir. */
 int  can_monitor_rx(can_monitor_t *mon, uint32_t now_ms, int crc_ok, uint8_t counter);
-/* Periyodik (ör. her 10 ms): zaman aşımı kontrolü. CAN_ok = !mon->safe */
+/* Periyodik (ör. her 10 ms): zaman aşımı kontrolü. CAN_ok = !mon->safe
+ * İlk geçerli mesajdan önce eşik CAN_TIMEOUT_FIRST_MS'dir (init anından itibaren). */
 void can_monitor_tick(can_monitor_t *mon, uint32_t now_ms);
 
 #endif

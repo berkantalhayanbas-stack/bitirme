@@ -147,7 +147,11 @@ int can_monitor_rx(can_monitor_t *mon, uint32_t now_ms, int crc_ok, uint8_t coun
 
 void can_monitor_tick(can_monitor_t *mon, uint32_t now_ms)
 {
-    uint32_t age = now_ms - mon->last_ok_ms;
+    uint32_t age = now_ms - mon->last_ok_ms;     /* ilk mesajdan önce: init'ten beri geçen süre */
+    if (!mon->have_counter) {                    /* açılış: henüz hiç geçerli mesaj yok */
+        if (age >= CAN_TIMEOUT_FIRST_MS) { mon->fault = 1;  mon->safe = 1; }
+        return;
+    }
     mon->fault = age >= CAN_TIMEOUT_FAULT_MS;
     if (age >= CAN_TIMEOUT_SAFE_MS) mon->safe = 1;               /* kalıcı */
 }

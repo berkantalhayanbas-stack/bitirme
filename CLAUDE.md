@@ -12,6 +12,9 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
   - `bms_can.*`: CAN mesaj kodlama, CRC-8 SAE J1850. ID'ler: 0x101/0x102 ölçüm (EMU→ECU), 0x201 kontrol, 0x202 durum (ECU→), 0x301 PC komutu.
   - `soh_tree.*`: üretilmiş ML karar ağacı (`ml/soh_tree.c` kaynaklı); elle düzenleme.
 - `bms/pil/`: test uygulamaları. `app_pil.c` UART ikili protokol (PC tarafı `pil_test.py`), `app_can_lb.c` loopback testi, `app_can_node.c` gerçek hat.
+- `arduino/`: Arduino Uno + MCP2515 (8 MHz, CS D10, INT D2) karşı düğüm sketch'leri; CubeIDE derlemesine girmez. `mcp2515_loopback/` iç geri döngü testi, `mcp2515_node/` gerçek hatta EMU düğümü (0x101/0x102 gönderir, 0x202 alır).
+  - `arduino/mcp2515_node/bms_can.*` = `bms/common/bms_can.*`'nin **birebir kopyası**. `bms_can.*` değişirse kopyayı da güncelle.
+- Donanım: FDCAN1 PA11 (RX) / PA12 (TX), AF9 → TJA1050 transceiver (5 V beslemeli). PA11/PA12 FT_u; RXD 5 V sürdüğü için bu pinlerde iç pull-up/pull-down AÇMA (DS12589).
 - `Drivers/` (CMSIS), `Startup/`, `*.ld`: üretici dosyaları, dokunma.
 
 ## Kodlama kuralları
