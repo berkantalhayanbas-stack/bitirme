@@ -5,17 +5,20 @@
  *   APP_PIL          PC'den UART ile PIL testi (pil_test.py)
  *   APP_CAN_LOOPBACK FDCAN1 iç geri döngü testi, sonuç UART'a metin olarak yazılır
  *   APP_CAN_NODE     FDCAN1 normal mod, gerçek hat (PA11/PA12 + transceiver), UART'a durum raporu
+ *   APP_ECU          BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202 (gerçek hat)
  */
 #include "bsp.h"
 #include "app_pil.h"
 #include "app_can_lb.h"
 #include "app_can_node.h"
+#include "app_ecu.h"
 
 #define APP_PIL           1
 #define APP_CAN_LOOPBACK  2
 #define APP_CAN_NODE      3
+#define APP_ECU           4
 #ifndef APP_MODE
-#define APP_MODE  APP_CAN_LOOPBACK
+#define APP_MODE  APP_ECU
 #endif
 
 int main(void)
@@ -25,6 +28,8 @@ int main(void)
     can_lb_run();   /* geri dönmez */
 #elif APP_MODE == APP_CAN_NODE
     can_node_run(); /* geri dönmez */
+#elif APP_MODE == APP_ECU
+    ecu_run();      /* geri dönmez */
 #else
     pil_run();      /* geri dönmez */
 #endif
