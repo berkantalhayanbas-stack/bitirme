@@ -20,7 +20,7 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
   - `arduino/mcp2515_node/bms_can.*` ve `arduino/mcp2515_bridge/bms_can.*` = `bms/common/bms_can.*`'nin **birebir kopyası**. `bms_can.*` değişirse kopyaları da güncelle.
   - `app_ecu.c` adımı ölçüm çifti (0x101 + 0x102) gelince atar; oynatma testinin örnek örnek karşılaştırması buna dayanır.
 - `arduino/can_soak/`: 10 dk CAN dayanıklılık testinin göndereni (0x101, 16 bit sayaç, 10 Hz).
-- `tools/`: `fw_build.py` (CubeIDE'den bağımsız derleme + ST-LINK yükleme, `--crc-ref`), `can_soak_run.py`, `la_view.py` (lojik analizör çözücüsü, PNG), `live_panel.py` (canlı panel, CSV). Çıktılar `build/` (git dışı).
+- `tools/`: `fw_build.py` (CubeIDE'den bağımsız derleme + ST-LINK yükleme, `--crc-ref`), `can_soak_run.py`, `la_view.py` (lojik analizör çözücüsü, PNG), `live_panel.py` (canlı panel, CSV), `out_demo.py` (far/kontaktör yavaş gösterimi, `BMS_OUTPUTS=1` ile). Çıktılar `build/` (git dışı).
 - `tools/pil_test/`: PC tarafı test betikleri (Python; CubeIDE derlemesine girmez). `pil_test.py` UART PIL, `can_replay.py` CAN oynatma. `data/<senaryo>_in.csv` girdi, `data/<senaryo>_c.csv` PC SIL referans çıktısı (`C:\bitirme`'den üretilir). Betiklerin yazdığı sonuç CSV'leri git dışı.
 - Donanım: FDCAN1 PA11 (RX) / PA12 (TX), AF9 → TJA1050 transceiver (5 V beslemeli). PA11/PA12 FT_u; RXD 5 V sürdüğü için bu pinlerde iç pull-up/pull-down AÇMA (DS12589).
 - `Drivers/` (CMSIS), `Startup/`, `*.ld`: üretici dosyaları, dokunma.
