@@ -1,6 +1,6 @@
 /* mcp2515_bridge.ino -- Arduino Uno + MCP2515, PC <-> CAN köprüsü (kayıtlı veriyi CAN'dan oynatma).
  *
- * PC'deki can_replay.py kayıtlı ölçüm dizisini (pil_test/data/<senaryo>_in.csv) örnek örnek
+ * PC'deki tools/pil_test/can_replay.py kayıtlı ölçüm dizisini (data/<senaryo>_in.csv) örnek örnek
  * yollar; köprü her örneği 0x101 + 0x102 olarak CAN'a basar, ECU'nun (APP_ECU) o örnek için
  * gönderdiği 0x201 + 0x202'yi bekler, çözer ve PC'ye döndürür. Kilitli adım (lock-step):
  * PC cevabı almadan sonraki örneği yollamaz, bu yüzden hız serbesttir (gerçek zamandan hızlı).

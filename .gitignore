@@ -11,6 +11,10 @@ Release/
 *.bin
 *.hex
 
+# PC test betiklerinin çıktıları (girdi/referans verisi tools/pil_test/data/ izlenir)
+tools/pil_test/*.csv
+__pycache__/
+
 # IDE yerel ayarları
 .settings/
 *.launch

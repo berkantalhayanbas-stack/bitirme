@@ -2,7 +2,7 @@
  * Boş CubeIDE projesindeki Src/main.c'nin yerine bu içerik konur.
  *
  * Hangi uygulamanın çalışacağı APP_MODE ile seçilir:
- *   APP_PIL          PC'den UART ile PIL testi (pil_test.py)
+ *   APP_PIL          PC'den UART ile PIL testi (tools/pil_test/pil_test.py)
  *   APP_CAN_LOOPBACK FDCAN1 iç geri döngü testi, sonuç UART'a metin olarak yazılır
  *   APP_CAN_NODE     FDCAN1 normal mod, gerçek hat (PA11/PA12 + transceiver), UART'a durum raporu
  *   APP_ECU          BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202 (gerçek hat)
