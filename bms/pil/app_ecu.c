@@ -47,6 +47,15 @@
 #if BMS_SAFETY
 #include "bsp_safety.h"
 #endif
+#ifndef BMS_OUTPUTS
+#define BMS_OUTPUTS 0                        /* 1: far PWM (PA8/PA9) + kontaktör (PB5) (adım 4) */
+#endif
+#if BMS_OUTPUTS
+#include "bsp_out.h"
+#define OUT_I_NOM_DIS   (7.275f * BMS_NP)    /* 87,3 A: veri sayfası 1,5C x Np (decision.py I_nom_dis) */
+#define OUT_LOW_MIN     0.25f                /* kısa far alt sınırı */
+#define OUT_HIGH_MIN    0.70f                /* I_allow/I_nom bunun altında: uzun far kapalı */
+#endif
 #ifndef BMS_TELEMETRY
 #define BMS_TELEMETRY 0                      /* 1: her adımda "D,..." telemetri satırı (adım 9, tools/live_panel.py) */
 #endif
@@ -91,6 +100,7 @@ static void kf(const char *k, float v)       /* bir ondalık basamak */
     if (x < 0) { put_s("-"); x = -x; }
     put_u((uint32_t)x / 10u); put_s("."); put_u((uint32_t)x % 10u);
 }
+#if BMS_TELEMETRY
 static void put_fix(float v, uint32_t dec)   /* sabit ondalık (dec <= 4), virgülle başlar */
 {
     static const float scale[] = { 1.0f, 10.0f, 100.0f, 1000.0f, 10000.0f };
@@ -105,11 +115,34 @@ static void put_fix(float v, uint32_t dec)   /* sabit ondalık (dec <= 4), virg�
         while (d) { put_u(f / d); f %= d; d /= 10u; }
     }
 }
+#endif
 
 static const char *state_name(uint8_t s)
 {
     return s == ST_NORMAL ? "NORMAL" : s == ST_DERATE ? "DERATE" : s == ST_LIMP ? "LIMP" : "SAFE";
 }
+
+#if BMS_OUTPUTS
+/* ---------------------------------------------------------------- araç çıkışları (adım 4)
+ * Kısa far duty = I_allow_dis / I_nom (alt sınır %25); oran < %70 -> uzun far kapalı, değilse aynı duty.
+ * Kontaktör: NORMAL / DERATE / LIMP-HOME'da kapalı (röle çekili), SAFE-STOP'ta açık; SAFE'te tüm
+ * farlar sönük. Ölçüm gelmeden (açılış) her şey kapalı. CAN kesilirse izleyici SAFE'e geçirir. */
+static float out_low, out_high;
+static uint8_t out_k;
+static void apply_outputs(uint8_t state, float i_allow_dis)
+{
+    if (state == ST_SAFE || state == 0u) {
+        out_low = 0.0f;  out_high = 0.0f;  out_k = 0u;
+    } else {
+        float r = i_allow_dis / OUT_I_NOM_DIS;
+        if (r > 1.0f) r = 1.0f;
+        out_low  = r < OUT_LOW_MIN ? OUT_LOW_MIN : r;
+        out_high = r < OUT_HIGH_MIN ? 0.0f : r;
+        out_k = 1u;
+    }
+    bsp_out_set(out_low, out_high, out_k);
+}
+#endif
 
 /* ---------------------------------------------------------------- 0x301 komutları */
 static void cmd_result(int ok, const char *msg)
@@ -194,6 +227,9 @@ void ecu_run(void)
     bms_init(&bms, SOC0_EKF, 1.0f, 1.0f, 0.0f, 0.0f);
     memset(&out, 0, sizeof(out));
     bsp_can_init_normal();
+#if BMS_OUTPUTS
+    bsp_out_init();                                   /* farlar sönük, kontaktör açık */
+#endif
     for (int m = 0; m < N_RX; m++) can_monitor_init(&mon[m], 0);
     /* Zaman tabanı CAN açıldıktan SONRA alınır: önceden alınırsa döngü açılıştaki LED süresini
      * (0.9 s) birkaç ms'de "yetişir"; bu sırada gelen ilk çerçeve (EMU'nun ACK alamayıp beklettiği)
@@ -273,6 +309,9 @@ void ecu_run(void)
                 send_ctrl = 1;
             }
 
+#if BMS_OUTPUTS
+            if (send_ctrl) apply_outputs(ctrl.state, ctrl.I_allow_dis);
+#endif
             if (send_ctrl) {
                 can_encode_ctrl(&ctrl, cnt_ctrl, d);
                 if (bsp_can_send(CAN_ID_ECU_CTRL, d, 8)) { tx_ok++; cnt_ctrl = (cnt_ctrl + 1u) & 0x0Fu; }
@@ -332,6 +371,16 @@ void ecu_run(void)
             kv(" | TEC ", e.tec); kv(" REC ", e.rec); kv(" LEC ", e.lec);
             put_s(e.bo ? " BUS-OFF" : e.ep ? " PASSIVE" : e.ew ? " WARN" : " ACTIVE");
             kv(" bo#", e.n_busoff); kv(" lost#", e.n_rx_lost);
+#if BMS_OUTPUTS
+            {   /* pin seviyesinde doğrulama (20 ms örnekleme): set edilen ve ölçülen */
+                bsp_out_meas_t om;
+                bsp_out_measure(20000u, &om);
+                kf(" | OUT low set ", 100.0f * out_low);  kf("% meas ", 100.0f * om.d_low);
+                kv("% ", om.f_low_hz);  kf("Hz | high set ", 100.0f * out_high);
+                kf("% meas ", 100.0f * om.d_high);  kv("% ", om.f_high_hz);
+                kv("Hz | K ", om.contactor);  put_s(om.contactor ? " closed" : " open");
+            }
+#endif
             put_s("\r\n");
             bsp_led_toggle();
         }
