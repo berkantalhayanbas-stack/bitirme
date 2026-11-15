@@ -18,3 +18,6 @@ __pycache__/
 # IDE yerel ayarları
 .settings/
 *.launch
+
+# tools/fw_build.py derleme çıktıları
+build/
