@@ -13,7 +13,9 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
   - `soh_tree.*`: üretilmiş ML karar ağacı (`ml/soh_tree.c` kaynaklı); elle düzenleme.
 - `bms/pil/`: test uygulamaları. `app_pil.c` UART ikili protokol (PC tarafı `pil_test.py`), `app_can_lb.c` loopback testi, `app_can_node.c` gerçek hat (yalnız CAN), `app_ecu.c` tam zincir (`APP_ECU`=4): CAN 0x101/0x102 → `bms_step` → 0x201/0x202.
 - `arduino/`: Arduino Uno + MCP2515 (8 MHz, CS D10, INT D2) karşı düğüm sketch'leri; CubeIDE derlemesine girmez. `mcp2515_loopback/` iç geri döngü testi, `mcp2515_node/` gerçek hatta EMU düğümü (0x101/0x102 gönderir, 0x202 alır).
-  - `arduino/mcp2515_node/bms_can.*` = `bms/common/bms_can.*`'nin **birebir kopyası**. `bms_can.*` değişirse kopyayı da güncelle.
+  - `mcp2515_bridge/` PC ↔ CAN köprüsü: `pil_test/can_replay.py` kayıtlı veriyi (`pil_test/data/*_in.csv`) CAN'dan oynatır, ECU'nun 0x201/0x202 cevabını SIL çıktısıyla karşılaştırır. Seri protokol sketch'in başında; değişirse `can_replay.py` de güncellenmeli.
+  - `arduino/mcp2515_node/bms_can.*` ve `arduino/mcp2515_bridge/bms_can.*` = `bms/common/bms_can.*`'nin **birebir kopyası**. `bms_can.*` değişirse kopyaları da güncelle.
+  - `app_ecu.c` adımı ölçüm çifti (0x101 + 0x102) gelince atar; oynatma testinin örnek örnek karşılaştırması buna dayanır.
 - Donanım: FDCAN1 PA11 (RX) / PA12 (TX), AF9 → TJA1050 transceiver (5 V beslemeli). PA11/PA12 FT_u; RXD 5 V sürdüğü için bu pinlerde iç pull-up/pull-down AÇMA (DS12589).
 - `Drivers/` (CMSIS), `Startup/`, `*.ld`: üretici dosyaları, dokunma.
 

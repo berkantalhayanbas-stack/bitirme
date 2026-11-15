@@ -3,15 +3,20 @@
  *   0x101 (V, I, T) + 0x102 (V_min, V_max, T_amb)  ->  bms_step  ->  0x201 (I_allow, durum, neden)
  *                                                                    0x202 (SOC, Tc, SOH, psi)
  *
- *   her 10 ms : bsp_can_service (bus-off kurtarma), alınan çerçeveleri çöz (CRC + sayaç),
- *               zaman aşımı izleyicileri (yalnız periyodik 0x101 / 0x102)
- *   her 100 ms: (BMS_TS) son geçerli ölçümlerle bir bms_step, 0x201 ve 0x202 gönder
+ *   her 1 ms  : alınan çerçeveleri çöz (CRC + sayaç); yeni ölçüm çifti geldiyse bir bms_step,
+ *               0x201 ve 0x202 gönder
+ *   her 10 ms : bsp_can_service (bus-off kurtarma), zaman aşımı izleyicileri (yalnız 0x101 / 0x102)
  *   her 1 s   : LPUART1'e (115200 8N1) tek satır durum raporu
  *
  * Kurallar
+ *   - Adım ölçümle tetiklenir: son adımdan beri hem yeni 0x101 hem yeni 0x102 geldiyse bir
+ *     bms_step koşar (her ölçüm örneği tam bir kez kullanılır; EMU periyodu 100 ms = BMS_TS).
+ *     Çift ECU_STEP_LATE_MS içinde tamamlanmazsa (kayıp çerçeve) son geçerli ölçümlerle adım
+ *     atılır (sıfır dereceli tutucu), sonra 100 ms'de bir; 500 ms'de SAFE.
+ *     Bu sayede kayıtlı veri CAN'dan oynatılırken (arduino/mcp2515_bridge + can_replay.py)
+ *     sonuçlar PC'deki SIL çıktısıyla örnek örnek karşılaştırılabilir.
  *   - CAN_ok = 0x101 ve 0x102 izleyicilerinin hiçbiri SAFE değil. SAFE kalıcıdır (izleyici ve
  *     karar mekanizması kilitler); çıkış için ECU yeniden başlatılır.
- *   - Kayıp çerçevede son geçerli ölçüm tutulur (sıfır dereceli tutucu); 500 ms'de SAFE.
  *   - Açılış: iki mesajdan da ilk geçerli ölçüm gelene kadar bms_step koşmaz ve ECU hiçbir şey
  *     göndermez. CAN_TIMEOUT_FIRST_MS içinde ölçüm gelmezse yalnız 0x201 gönderilir:
  *     SAFE, I_allow = 0, neden 128 (0x202 gönderilmez: geçerli bir kestirim yok).
@@ -28,6 +33,8 @@
 #include "bms_can.h"
 
 #define SOC0_EKF  0.5f                       /* EKF başlangıç SOC'si (PIL ile aynı) */
+#define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
+#define ECU_STEP_HOLD_MS  100u               /* tutulan değerle adım periyodu (BMS_TS) */
 
 enum { R_M1, R_M2, R_CMD, N_RX };
 #define N_PERIODIC  2                        /* R_M1, R_M2: zaman aşımı izlenenler */
@@ -64,9 +71,9 @@ void ecu_run(void)
     can_meas1_t m1 = { 0 };
     can_meas2_t m2 = { 0 };
     bms_out_t out;
-    uint8_t have_m1 = 0, have_m2 = 0, stepped = 0;
+    uint8_t have_m1 = 0, have_m2 = 0, fresh_m1 = 0, fresh_m2 = 0, stepped = 0;
     uint8_t cnt_ctrl = 0, cnt_stat = 0;
-    uint32_t now_ms = 0, t_last = bsp_cycles();
+    uint32_t now_ms = 0, t_last = bsp_cycles(), deadline_ms = 0, n_hold = 0;
     uint32_t tx_ok = 0, tx_busy = 0, other = 0, n_cmd = 0, cyc_max = 0;
     float soh = 1.0f;
 
@@ -83,21 +90,19 @@ void ecu_run(void)
         t_last += BSP_CPU_HZ / 1000u;
         now_ms++;
 
-        /* ---- her 10 ms: alım ve izleyiciler ---- */
-        if (now_ms % 10u == 0) {
-            (void)bsp_can_service(now_ms);
-
+        /* ---- her 1 ms: alım ---- */
+        {
             uint16_t id;  uint8_t d[8], len, c;
             while (bsp_can_recv(&id, d, &len)) {
                 if (len != 8) { other++; continue; }
                 if (id == CAN_ID_EMU_MEAS1) {
                     can_meas1_t a;
                     const int ok = can_decode_meas1(d, &a, &c);
-                    if (can_monitor_rx(&mon[R_M1], now_ms, ok, c)) { m1 = a;  have_m1 = 1; }
+                    if (can_monitor_rx(&mon[R_M1], now_ms, ok, c)) { m1 = a;  have_m1 = 1;  fresh_m1 = 1; }
                 } else if (id == CAN_ID_EMU_MEAS2) {
                     can_meas2_t b;
                     const int ok = can_decode_meas2(d, &b, &c);
-                    if (can_monitor_rx(&mon[R_M2], now_ms, ok, c)) { m2 = b;  have_m2 = 1; }
+                    if (can_monitor_rx(&mon[R_M2], now_ms, ok, c)) { m2 = b;  have_m2 = 1;  fresh_m2 = 1; }
                 } else if (id == CAN_ID_PC_CMD) {
                     can_cmd_t q;
                     const int ok = can_decode_cmd(d, &q, &c);
@@ -106,16 +111,27 @@ void ecu_run(void)
                     other++;                                    /* filtre doğruysa olmamalı */
                 }
             }
+        }
+
+        /* ---- her 10 ms: bus-off kurtarma ve izleyiciler ---- */
+        if (now_ms % 10u == 0) {
+            (void)bsp_can_service(now_ms);
             for (int m = 0; m < N_PERIODIC; m++) can_monitor_tick(&mon[m], now_ms);
         }
 
-        /* ---- her 100 ms: BMS adımı ve gönderim ---- */
-        if (now_ms % 100u == 0) {
+        /* ---- BMS adımı ve gönderim: yeni ölçüm çifti gelince (ya da gecikince tutulan değerle);
+         *      ölçüm hiç gelmediyse 100 ms'de bir durum değerlendirmesi ---- */
+        const uint8_t have = have_m1 && have_m2, fresh = fresh_m1 && fresh_m2;
+        const uint8_t late = have && (int32_t)(now_ms - deadline_ms) >= 0;
+        if (have ? (fresh || late) : (now_ms % 100u == 0)) {
             const uint8_t can_ok = !(mon[R_M1].safe || mon[R_M2].safe);
             can_ctrl_t ctrl;
             uint8_t d[8], send_stat = 0, send_ctrl = 0;
 
-            if (have_m1 && have_m2) {
+            if (have) {
+                if (!fresh) n_hold++;
+                deadline_ms = now_ms + (fresh ? ECU_STEP_LATE_MS : ECU_STEP_HOLD_MS);
+                fresh_m1 = 0;  fresh_m2 = 0;
                 const bms_in_t in = { m1.I, m1.V, m1.T, m2.V_min, m2.V_max, m2.T_amb, can_ok };
                 const uint32_t t0 = bsp_cycles();
                 bms_step(&bms, &in, &out);
@@ -170,7 +186,7 @@ void ecu_run(void)
                 }
                 if (mon[m].safe) put_s("!SAFE"); else if (mon[m].fault) put_s("!TO");
             }
-            kv(" cmd:", n_cmd); kv(" other:", other);
+            kv(" hold:", n_hold); kv(" cmd:", n_cmd); kv(" other:", other);
             kv(" | tx ok:", tx_ok); kv(" busy:", tx_busy);
             kv(" | TEC ", e.tec); kv(" REC ", e.rec); kv(" LEC ", e.lec);
             put_s(e.bo ? " BUS-OFF" : e.ep ? " PASSIVE" : e.ew ? " WARN" : " ACTIVE");
