@@ -47,6 +47,9 @@
 #if BMS_SAFETY
 #include "bsp_safety.h"
 #endif
+#ifndef BMS_TELEMETRY
+#define BMS_TELEMETRY 0                      /* 1: her adımda "D,..." telemetri satırı (adım 9, tools/live_panel.py) */
+#endif
 
 #define SOC0_EKF  0.5f                      /* EKF başlangıç SOC'si (PIL ile aynı) */
 #define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
@@ -88,6 +91,21 @@ static void kf(const char *k, float v)       /* bir ondalık basamak */
     if (x < 0) { put_s("-"); x = -x; }
     put_u((uint32_t)x / 10u); put_s("."); put_u((uint32_t)x % 10u);
 }
+static void put_fix(float v, uint32_t dec)   /* sabit ondalık (dec <= 4), virgülle başlar */
+{
+    static const float scale[] = { 1.0f, 10.0f, 100.0f, 1000.0f, 10000.0f };
+    const float s = scale[dec];
+    int32_t x = (int32_t)(v * s + (v < 0.0f ? -0.5f : 0.5f));
+    put_s(",");
+    if (x < 0) { put_s("-"); x = -x; }
+    put_u((uint32_t)x / (uint32_t)s);
+    if (dec) {
+        uint32_t f = (uint32_t)x % (uint32_t)s, d = (uint32_t)s / 10u;
+        put_s(".");
+        while (d) { put_u(f / d); f %= d; d /= 10u; }
+    }
+}
+
 static const char *state_name(uint8_t s)
 {
     return s == ST_NORMAL ? "NORMAL" : s == ST_DERATE ? "DERATE" : s == ST_LIMP ? "LIMP" : "SAFE";
@@ -266,6 +284,18 @@ void ecu_run(void)
                 if (bsp_can_send(CAN_ID_ECU_STATUS, d, 8)) { tx_ok++; cnt_stat = (cnt_stat + 1u) & 0x0Fu; }
                 else tx_busy++;
             }
+#if BMS_TELEMETRY
+            /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
+             * CAN Rx FIFO'su boş). D,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax */
+            if (send_ctrl) {
+                put_s("D,");  put_u(now_ms);  put_s(",");  put_u(out.dec.state);  put_s(",");  put_u(out.dec.cause);
+                put_fix(100.0f * out.soc, 2);  put_fix(out.tc, 2);  put_fix(out.ts, 2);
+                put_fix(out.dec.i_allow_dis, 1);  put_fix(out.dec.i_allow_chg, 1);  put_fix(out.dec.psi, 3);
+                put_fix(100.0f * soh, 1);
+                put_fix(m1.I, 1);  put_fix(m1.V, 1);  put_fix(m1.T, 1);  put_fix(m2.V_min, 3);  put_fix(m2.V_max, 3);
+                put_s("\r\n");
+            }
+#endif
         }
 
         /* ---- her 1 s: rapor ---- */
