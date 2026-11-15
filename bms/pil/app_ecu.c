@@ -2,9 +2,10 @@
  *
  *   0x101 (V, I, T) + 0x102 (V_min, V_max, T_amb)  ->  bms_step  ->  0x201 (I_allow, durum, neden)
  *                                                                    0x202 (SOC, Tc, SOH, psi)
+ *   0x301 (PC komutu, olay mesajı)                   ->  ECU komutları 0x01-0x03 (bms_can.h)
  *
  *   her 1 ms  : alınan çerçeveleri çöz (CRC + sayaç); yeni ölçüm çifti geldiyse bir bms_step,
- *               0x201 ve 0x202 gönder
+ *               0x201 ve 0x202 gönder; 0x301 komutunu hemen işle
  *   her 10 ms : bsp_can_service (bus-off kurtarma), zaman aşımı izleyicileri (yalnız 0x101 / 0x102)
  *   her 1 s   : LPUART1'e (115200 8N1) tek satır durum raporu
  *
@@ -16,14 +17,23 @@
  *     Bu sayede kayıtlı veri CAN'dan oynatılırken (arduino/mcp2515_bridge + can_replay.py)
  *     sonuçlar PC'deki SIL çıktısıyla örnek örnek karşılaştırılabilir.
  *   - CAN_ok = 0x101 ve 0x102 izleyicilerinin hiçbiri SAFE değil. SAFE kalıcıdır (izleyici ve
- *     karar mekanizması kilitler); çıkış için ECU yeniden başlatılır.
+ *     karar mekanizması kilitler); çıkış ECU'nun yeniden başlatılmasıyla: reset düğmesi, güç
+ *     ya da korumalı 0x301 komutu (CAN_CMD_ECU_RESTART).
  *   - Açılış: iki mesajdan da ilk geçerli ölçüm gelene kadar bms_step koşmaz ve ECU hiçbir şey
  *     göndermez. CAN_TIMEOUT_FIRST_MS içinde ölçüm gelmezse yalnız 0x201 gönderilir:
  *     SAFE, I_allow = 0, neden 128 (0x202 gönderilmez: geçerli bir kestirim yok).
- *   - 0x301 (PC komutu) çözülür ve sayılır; komutların anlamı henüz uygulanmadı.
+ *   - 0x301: CRC doğru ve alive counter bir öncekinden farklıysa kabul edilir (tekrar reddedilir).
+ *     Açılıştan sonraki ilk CAN_CMD_HOLDOFF_MS (1 s) içinde gelen komutlar reddedilir (ECU kapalıyken
+ *     gönderilip EMU'da bekletilmiş bayat çerçeveler; bkz. bms_can.h).
+ *       0x01 yeniden başlat  value = 0xA5A5 ve taze 0x101'de (< 250 ms) |I| < 1 A
+ *       0x02 SOC ayarla      value = SOC [0.01 %] 0..10000 -> EKF SOC durumu (kovaryans aynı)
+ *       0x03 sayaçları sil   CAN/uygulama hata sayaçları (TEC/REC donanımın, dokunulmaz)
+ *       0x10-0x1F            EMU komutları: yok sayılır (sayılır)
+ *     Her komut UART'a tek satır sonuç yazar: "cmd 0x02 value 5000: OK ..." / "REJECTED ...".
  *   - SOH: soh_tree'nin efc ve days girdileri ECU'da henüz tutulmuyor (kalıcı bellek yok),
  *     0 verilir; T = Tc_hat, m = anlık SOC, rr = direnç kestiricisi. Bu yüzden SOH yaklaşık.
  */
+#include <math.h>
 #include <string.h>
 #include "app_ecu.h"
 #include "bsp.h"
@@ -36,10 +46,14 @@
 #define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
 #define ECU_STEP_HOLD_MS  100u               /* tutulan değerle adım periyodu (BMS_TS) */
 
-enum { R_M1, R_M2, R_CMD, N_RX };
-#define N_PERIODIC  2                        /* R_M1, R_M2: zaman aşımı izlenenler */
+enum { R_M1, R_M2, N_RX };                   /* zaman aşımı izlenen periyodik mesajlar */
 
 static bms_t bms;
+static can_monitor_t mon[N_RX];
+static can_meas1_t m1;
+static uint8_t have_m1;
+static uint32_t n_hold, other, tx_busy, cyc_max;
+static uint32_t n_cmd, n_cmd_rej, n_cmd_emu, n_cmd_crc, n_cmd_dup;
 
 /* ---------------------------------------------------------------- metin çıktısı (printf yok) */
 static void put_s(const char *s) { bsp_uart_write((const uint8_t *)s, (uint32_t)strlen(s)); }
@@ -50,6 +64,13 @@ static void put_u(uint32_t v)
     b[i] = 0;
     do { b[--i] = (char)('0' + v % 10u); v /= 10u; } while (v);
     put_s(&b[i]);
+}
+static void put_i(int32_t v) { if (v < 0) { put_s("-"); v = -v; } put_u((uint32_t)v); }
+static void put_x8(uint8_t v)
+{
+    const char h[] = "0123456789ABCDEF";
+    char b[3] = { h[v >> 4], h[v & 15u], 0 };
+    put_s(b);
 }
 static void kv(const char *k, uint32_t v) { put_s(k); put_u(v); }
 static void kf(const char *k, float v)       /* bir ondalık basamak */
@@ -64,25 +85,68 @@ static const char *state_name(uint8_t s)
     return s == ST_NORMAL ? "NORMAL" : s == ST_DERATE ? "DERATE" : s == ST_LIMP ? "LIMP" : "SAFE";
 }
 
+/* ---------------------------------------------------------------- 0x301 komutları */
+static void cmd_result(int ok, const char *msg)
+{
+    if (ok) put_s(": OK "); else { put_s(": REJECTED "); n_cmd_rej++; }
+    put_s(msg);
+    put_s("\r\n");
+}
+
+static void command(const can_cmd_t *q, uint32_t now_ms)
+{
+    put_s("cmd 0x"); put_x8(q->cmd); put_s(" value "); put_i(q->value);
+    if (now_ms < CAN_CMD_HOLDOFF_MS) { cmd_result(0, "boot hold-off (stale frame?)"); return; }
+    switch (q->cmd) {
+    case CAN_CMD_ECU_RESTART: {
+        /* Taze ölçüm şart: yeni açılmış ECU'ya, kapalıyken gönderilip EMU'da bekletilmiş eski bir
+         * yeniden başlatma komutu gelirse (ölçüm yok) reddedilir; aksi hâlde art arda yeniden başlar. */
+        const uint8_t fresh = have_m1 && (now_ms - mon[R_M1].last_ok_ms) < CAN_TIMEOUT_FAULT_MS;
+        if (q->value != CAN_CMD_UNLOCK)                    cmd_result(0, "restart: wrong unlock value");
+        else if (!fresh)                                   cmd_result(0, "restart: current unknown (no fresh 0x101)");
+        else if (fabsf(m1.I) >= CAN_CMD_RESTART_I_A)       cmd_result(0, "restart: current flowing");
+        else { cmd_result(1, "restarting"); bsp_reset(); }
+        break;
+    }
+    case CAN_CMD_ECU_SET_SOC:
+        if (q->value < 0 || q->value > 10000) { cmd_result(0, "set SOC: out of range 0..10000"); break; }
+        bms.ekf.x[0] = (float)q->value * 1e-4f;
+        cmd_result(1, "EKF SOC set");
+        break;
+    case CAN_CMD_ECU_CLR_STATS:
+        for (int m = 0; m < N_RX; m++) { mon[m].n_crc_err = 0; mon[m].n_cnt_err = 0; mon[m].n_lost = 0; }
+        n_hold = 0; other = 0; tx_busy = 0; cyc_max = 0;
+        n_cmd_rej = 0; n_cmd_emu = 0; n_cmd_crc = 0; n_cmd_dup = 0;
+        bsp_can_clear_stats();
+        cmd_result(1, "statistics cleared");
+        break;
+    default:
+        if (q->cmd >= 0x10u && q->cmd <= 0x1Fu) { n_cmd_emu++; put_s(": EMU command, ignored\r\n"); }
+        else cmd_result(0, "unknown command");
+        break;
+    }
+}
+
 /* ---------------------------------------------------------------- uygulama */
 void ecu_run(void)
 {
-    static can_monitor_t mon[N_RX];
-    can_meas1_t m1 = { 0 };
     can_meas2_t m2 = { 0 };
     bms_out_t out;
-    uint8_t have_m1 = 0, have_m2 = 0, fresh_m1 = 0, fresh_m2 = 0, stepped = 0;
-    uint8_t cnt_ctrl = 0, cnt_stat = 0;
-    uint32_t now_ms = 0, t_last = bsp_cycles(), deadline_ms = 0, n_hold = 0;
-    uint32_t tx_ok = 0, tx_busy = 0, other = 0, n_cmd = 0, cyc_max = 0;
+    uint8_t have_m2 = 0, fresh_m1 = 0, fresh_m2 = 0, stepped = 0;
+    uint8_t cnt_ctrl = 0, cnt_stat = 0, cmd_have = 0, cmd_cnt = 0;
+    uint32_t now_ms = 0, t_last, deadline_ms = 0, tx_ok = 0;
     float soh = 1.0f;
 
     for (int k = 0; k < 6; k++) { bsp_led_toggle(); bsp_delay_ms(150); }
-    put_s("\r\n=== BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202, 500 kbit/s ===\r\n");
+    put_s("\r\n=== BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202, 0x301 commands, 500 kbit/s ===\r\n");
     bms_init(&bms, SOC0_EKF, 1.0f, 1.0f, 0.0f, 0.0f);
     memset(&out, 0, sizeof(out));
     bsp_can_init_normal();
     for (int m = 0; m < N_RX; m++) can_monitor_init(&mon[m], 0);
+    /* Zaman tabanı CAN açıldıktan SONRA alınır: önceden alınırsa döngü açılıştaki LED süresini
+     * (0.9 s) birkaç ms'de "yetişir"; bu sırada gelen ilk çerçeve (EMU'nun ACK alamayıp beklettiği)
+     * hemen ~900 ms yaşlanır ve izleyici açılışta SAFE'e kilitlenir. */
+    t_last = bsp_cycles();
 
     for (;;) {
         /* 1 ms'lik adımlarla zaman (DWT taşması 25 s'de bir; fark hesabı taşmaya dayanıklı) */
@@ -103,10 +167,11 @@ void ecu_run(void)
                     can_meas2_t b;
                     const int ok = can_decode_meas2(d, &b, &c);
                     if (can_monitor_rx(&mon[R_M2], now_ms, ok, c)) { m2 = b;  have_m2 = 1;  fresh_m2 = 1; }
-                } else if (id == CAN_ID_PC_CMD) {
+                } else if (id == CAN_ID_PC_CMD) {           /* olay mesajı: CRC + tekrar kontrolü */
                     can_cmd_t q;
-                    const int ok = can_decode_cmd(d, &q, &c);
-                    if (can_monitor_rx(&mon[R_CMD], now_ms, ok, c)) n_cmd++;
+                    if (!can_decode_cmd(d, &q, &c))         n_cmd_crc++;
+                    else if (cmd_have && c == cmd_cnt)      n_cmd_dup++;
+                    else { cmd_have = 1;  cmd_cnt = c;  n_cmd++;  command(&q, now_ms); }
                 } else {
                     other++;                                    /* filtre doğruysa olmamalı */
                 }
@@ -116,7 +181,7 @@ void ecu_run(void)
         /* ---- her 10 ms: bus-off kurtarma ve izleyiciler ---- */
         if (now_ms % 10u == 0) {
             (void)bsp_can_service(now_ms);
-            for (int m = 0; m < N_PERIODIC; m++) can_monitor_tick(&mon[m], now_ms);
+            for (int m = 0; m < N_RX; m++) can_monitor_tick(&mon[m], now_ms);
         }
 
         /* ---- BMS adımı ve gönderim: yeni ölçüm çifti gelince (ya da gecikince tutulan değerle);
@@ -177,7 +242,7 @@ void ecu_run(void)
             } else {
                 put_s(out.dec.state == ST_SAFE ? "SAFE (no measurements)" : "WAIT (no measurements yet)");
             }
-            for (int m = 0; m < N_PERIODIC; m++) {
+            for (int m = 0; m < N_RX; m++) {
                 put_s(m == R_M1 ? " | 101:" : " 102:");
                 put_u(mon[m].n_ok);
                 if (mon[m].n_crc_err || mon[m].n_cnt_err || mon[m].n_lost) {
@@ -186,7 +251,12 @@ void ecu_run(void)
                 }
                 if (mon[m].safe) put_s("!SAFE"); else if (mon[m].fault) put_s("!TO");
             }
-            kv(" hold:", n_hold); kv(" cmd:", n_cmd); kv(" other:", other);
+            kv(" hold:", n_hold); kv(" other:", other);
+            kv(" | cmd:", n_cmd);
+            if (n_cmd_rej || n_cmd_emu || n_cmd_crc || n_cmd_dup) {
+                kv("(rej", n_cmd_rej); kv(" emu", n_cmd_emu); kv(" crc", n_cmd_crc); kv(" dup", n_cmd_dup);
+                put_s(")");
+            }
             kv(" | tx ok:", tx_ok); kv(" busy:", tx_busy);
             kv(" | TEC ", e.tec); kv(" REC ", e.rec); kv(" LEC ", e.lec);
             put_s(e.bo ? " BUS-OFF" : e.ep ? " PASSIVE" : e.ew ? " WARN" : " ACTIVE");

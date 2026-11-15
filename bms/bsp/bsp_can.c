@@ -214,3 +214,10 @@ void bsp_can_errors(bsp_can_err_t *e)
     e->init = (uint8_t)((FDCAN1->CCCR & FDCAN_CCCR_INIT) != 0);
     e->cel = s_cel;  e->n_busoff = s_busoff;  e->n_recover = s_recover;  e->n_rx_lost = s_rx_lost;
 }
+
+void bsp_can_clear_stats(void)
+{
+    collect();                                   /* bekleyen olaylar da sayılıp silinsin */
+    (void)FDCAN1->ECR;                           /* CEL okununca sıfırlanır */
+    s_cel = 0;  s_busoff = 0;  s_recover = 0;  s_rx_lost = 0;
+}

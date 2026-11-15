@@ -19,5 +19,6 @@ void     bsp_delay_ms(uint32_t ms);
 uint32_t bsp_cycles(void);                        /* DWT->CYCCNT */
 void     bsp_uart_write(const uint8_t *buf, uint32_t n);
 void     bsp_uart_read(uint8_t *buf, uint32_t n);  /* n bayt gelene kadar bekler */
+void     bsp_reset(void);                         /* yazılımla sistem sıfırlaması (geri dönmez) */
 
 #endif

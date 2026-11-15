@@ -61,5 +61,7 @@ int  bsp_can_recv(uint16_t *id, uint8_t *data, uint8_t *len);
  * now_ms: uygulamanın milisaniye sayacı. Dönüş: 1 = bu çağrıda bus-off kurtarması başlatıldı. */
 int  bsp_can_service(uint32_t now_ms);
 void bsp_can_errors(bsp_can_err_t *e);
+/* Yazılım sayaçlarını sıfırla (cel, n_busoff, n_recover, n_rx_lost); TEC/REC donanımındır, dokunulmaz */
+void bsp_can_clear_stats(void);
 
 #endif

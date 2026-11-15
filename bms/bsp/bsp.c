@@ -106,6 +106,11 @@ void bsp_uart_write(const uint8_t *buf, uint32_t n)
     while (!(LPUART1->ISR & USART_ISR_TC)) { }                /* son bayt da çıksın */
 }
 
+void bsp_reset(void)
+{
+    NVIC_SystemReset();                                       /* SCB->AIRCR SYSRESETREQ */
+}
+
 void bsp_uart_read(uint8_t *buf, uint32_t n)
 {
     for (uint32_t i = 0; i < n; i++) {

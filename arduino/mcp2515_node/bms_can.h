@@ -12,6 +12,34 @@
 #define CAN_ID_ECU_STATUS  0x202u
 #define CAN_ID_PC_CMD      0x301u     /* olay mesajı: periyodik değil, zaman aşımı izlenmez */
 
+/* 0x301 komutları: d[0] = cmd, d[1..2] = value (int16, little-endian), d[3..5] = 0.
+ * Aralıklar: 0x01-0x0F ECU, 0x10-0x1F EMU; her düğüm yalnız kendi aralığını işler.
+ * Kabul (olay mesajı): CRC doğru ve alive counter bir önceki kabul edilen komutunkinden FARKLI
+ * (aynı çerçevenin tekrarı reddedilir; dizi atlaması kontrol edilmez, çünkü komutlar seyrek ve
+ * gönderen yeniden başlayınca sayaç sıfırdan başlar). EMU komutlarında value = süre [ms]
+ * (uint16 olarak okunur, 0 = 0x10 gelene kadar sürekli); hepsi 0x101 ve 0x102'ye birlikte uygulanır. */
+enum {
+    CAN_CMD_ECU_RESTART   = 0x01,  /* yazılımla yeniden başlat (SAFE'ten çıkış): value = CAN_CMD_UNLOCK,
+                                      yalnız taze 0x101'de |I| < CAN_CMD_RESTART_I_A iken; ölçüm
+                                      yoksa reddedilir (açılışta gelen bayat komutla art arda
+                                      yeniden başlamayı önler) */
+    CAN_CMD_ECU_SET_SOC   = 0x02,  /* EKF SOC kestirimini ayarla: value = SOC [0.01 %], 0..10000 */
+    CAN_CMD_ECU_CLR_STATS = 0x03,  /* CAN ve uygulama hata sayaçlarını sıfırla */
+    CAN_CMD_EMU_CLEAR     = 0x10,  /* tüm enjekte hataları kaldır */
+    CAN_CMD_EMU_CRC       = 0x11,  /* CRC'yi boz */
+    CAN_CMD_EMU_FREEZE    = 0x12,  /* alive counter'ı dondur */
+    CAN_CMD_EMU_SILENT    = 0x13,  /* 0x101/0x102 gönderme (kablo kopması taklidi) */
+    CAN_CMD_EMU_NTC_OPEN  = 0x14   /* NTC kopuk: T = -40 °C gönder */
+};
+#define CAN_CMD_UNLOCK        ((int16_t)0xA5A5)   /* yeniden başlatma kilidi */
+#define CAN_CMD_RESTART_I_A   1.0f                /* yeniden başlatmaya izin veren akım sınırı [A] */
+/* Açılıştan sonra bu süre boyunca ECU tüm 0x301 komutlarını reddeder: ECU kapalıyken gönderilen
+ * çerçeveler ACK alamadığı için gönderenin Tx tamponunda bekler ve ECU hatta katılınca teslim edilir.
+ * Bu bayat çerçeveler arasında 0x101 (yüksek öncelik) komuttan önce gelir; bekletilmiş bir yeniden
+ * başlatma komutu, bekletilmiş bir |I| ~ 0 ölçümüyle birlikte kabul edilip ECU'yu art arda
+ * yeniden başlatırdı (kartta görüldü). */
+#define CAN_CMD_HOLDOFF_MS    1000u
+
 #define CAN_TIMEOUT_FAULT_MS  250u   /* 2 periyot kaçırıldı -> arıza bayrağı */
 #define CAN_TIMEOUT_SAFE_MS   500u   /* son geçerli mesajdan 500 ms -> SAFE-STOP (CAN_ok = 0) */
 /* Sayaç kuralıyla birlikte (bms_can.c MAX_DELTA = 3) 100 ms periyotta etkin tolerans:

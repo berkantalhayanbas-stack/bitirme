@@ -33,13 +33,14 @@ static void kv(const char *k, uint32_t v) { put_s(k); put_u(v); }
 void can_node_run(void)
 {
     static can_monitor_t mon[N_RX];
-    uint32_t now_ms = 0, t_last = bsp_cycles(), tx_ok = 0, tx_full = 0, other = 0;
+    uint32_t now_ms = 0, t_last, tx_ok = 0, tx_full = 0, other = 0;
     uint8_t cnt_tx = 0;
 
     for (int k = 0; k < 6; k++) { bsp_led_toggle(); bsp_delay_ms(150); }
     put_s("\r\n=== FDCAN1 normal mode node, 500 kbit/s, PA11 RX / PA12 TX ===\r\n");
     bsp_can_init_normal();
     for (int m = 0; m < N_RX; m++) can_monitor_init(&mon[m], 0);
+    t_last = bsp_cycles();                   /* zaman tabanı CAN açıldıktan sonra (bkz. app_ecu.c) */
 
     for (;;) {
         /* 1 ms'lik adımlarla zaman (DWT taşması 25 s'de bir; fark hesabı taşmaya dayanıklı) */

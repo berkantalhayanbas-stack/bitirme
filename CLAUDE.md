@@ -10,6 +10,7 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
   - `bms_config.h`: tüm sabitler. Değerler `simulink/bms_param_struct.m` ve `twin/*.py` ile birebir aynı olmalı; biri değişirse diğerleri de değişmeli (kullanıcıya hatırlat).
   - `bms_algo.*`: SOC EKF `[SOC V1 V2 b_I]`, sıcaklık gözlemcisi `[Tc Ts g]`, sensör teşhisi, çevrimiçi direnç kestiricisi, karar mekanizması (NORMAL/DERATE/LIMP/SAFE). Giriş noktası `bms_init` / `bms_step` (Ts = 0.1 s).
   - `bms_can.*`: CAN mesaj kodlama, CRC-8 SAE J1850. ID'ler: 0x101/0x102 ölçüm (EMU→ECU), 0x201 kontrol, 0x202 durum (ECU→), 0x301 PC komutu.
+    0x301 komut kodları `bms_can.h`'de (`CAN_CMD_*`): 0x01-0x0F ECU (korumalı yeniden başlatma, SOC ayarla, sayaç sil), 0x10-0x1F EMU hata enjeksiyonu (CRC, donmuş sayaç, sessizlik, NTC kopuk). PC'den gönderim: `mcp2515_node` Serial Monitor'üne `c <cmd> <value>`.
   - `soh_tree.*`: üretilmiş ML karar ağacı (`ml/soh_tree.c` kaynaklı); elle düzenleme.
 - `bms/pil/`: test uygulamaları. `app_pil.c` UART ikili protokol (PC tarafı `pil_test.py`), `app_can_lb.c` loopback testi, `app_can_node.c` gerçek hat (yalnız CAN), `app_ecu.c` tam zincir (`APP_ECU`=4): CAN 0x101/0x102 → `bms_step` → 0x201/0x202.
 - `arduino/`: Arduino Uno + MCP2515 (8 MHz, CS D10, INT D2) karşı düğüm sketch'leri; CubeIDE derlemesine girmez. `mcp2515_loopback/` iç geri döngü testi, `mcp2515_node/` gerçek hatta EMU düğümü (0x101/0x102 gönderir, 0x202 alır).
