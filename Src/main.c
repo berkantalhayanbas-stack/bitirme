@@ -8,6 +8,7 @@
  *   APP_ECU          BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202 (gerçek hat)
  *   APP_CAN_SOAK     10 dakikalık CAN dayanıklılık testi (karşı düğüm: arduino/can_soak)
  *   APP_CORDIC       CORDIC ile yazılım expf/logf karşılaştırması (döngü + hata), UART tablosu
+ *   APP_LA           PA11 (CAN RX) lojik analizörü, TIM6 + DMA 4,25 MHz (PC: tools/la_view.py)
  * APP_MODE derleme bayrağıyla da verilebilir: -DAPP_MODE=5
  */
 #include "bsp.h"
@@ -17,6 +18,7 @@
 #include "app_ecu.h"
 #include "app_can_soak.h"
 #include "app_cordic.h"
+#include "app_la.h"
 
 #define APP_PIL           1
 #define APP_CAN_LOOPBACK  2
@@ -24,6 +26,7 @@
 #define APP_ECU           4
 #define APP_CAN_SOAK      5
 #define APP_CORDIC        6
+#define APP_LA            7
 #ifndef APP_MODE
 #define APP_MODE  APP_ECU
 #endif
@@ -41,6 +44,8 @@ int main(void)
     can_soak_run(); /* geri dönmez */
 #elif APP_MODE == APP_CORDIC
     cordic_run();   /* geri dönmez */
+#elif APP_MODE == APP_LA
+    la_run();       /* geri dönmez */
 #else
     pil_run();      /* geri dönmez */
 #endif
