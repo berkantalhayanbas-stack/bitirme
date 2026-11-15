@@ -25,6 +25,9 @@ enum {
                                       yeniden başlamayı önler) */
     CAN_CMD_ECU_SET_SOC   = 0x02,  /* EKF SOC kestirimini ayarla: value = SOC [0.01 %], 0..10000 */
     CAN_CMD_ECU_CLR_STATS = 0x03,  /* CAN ve uygulama hata sayaçlarını sıfırla */
+    CAN_CMD_ECU_HANG      = 0x04,  /* watchdog testi: value = CAN_CMD_UNLOCK -> sonsuz döngü; IWDG
+                                      ~100 ms'de sıfırlar, ECU "WDG reset" ile SAFE-STOP'ta açılır.
+                                      Yalnız BMS_SAFETY derlemesinde; diğerlerinde bilinmeyen komut */
     CAN_CMD_EMU_CLEAR     = 0x10,  /* tüm enjekte hataları kaldır */
     CAN_CMD_EMU_CRC       = 0x11,  /* CRC'yi boz */
     CAN_CMD_EMU_FREEZE    = 0x12,  /* alive counter'ı dondur */

@@ -41,8 +41,14 @@
 #include "bms_config.h"
 #include "bms_algo.h"
 #include "bms_can.h"
+#ifndef BMS_SAFETY
+#define BMS_SAFETY 0                         /* 1: IWDG + flash CRC + reset nedeni (adım 6) */
+#endif
+#if BMS_SAFETY
+#include "bsp_safety.h"
+#endif
 
-#define SOC0_EKF  0.5f                       /* EKF başlangıç SOC'si (PIL ile aynı) */
+#define SOC0_EKF  0.5f                      /* EKF başlangıç SOC'si (PIL ile aynı) */
 #define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
 #define ECU_STEP_HOLD_MS  100u               /* tutulan değerle adım periyodu (BMS_TS) */
 
@@ -54,6 +60,8 @@ static can_meas1_t m1;
 static uint8_t have_m1;
 static uint32_t n_hold, other, tx_busy, cyc_max;
 static uint32_t n_cmd, n_cmd_rej, n_cmd_emu, n_cmd_crc, n_cmd_dup;
+static uint8_t boot_safe;                    /* BMS_SAFETY: watchdog reseti ya da flash CRC hatası */
+static const char *boot_reason = "";
 
 /* ---------------------------------------------------------------- metin çıktısı (printf yok) */
 static void put_s(const char *s) { bsp_uart_write((const uint8_t *)s, (uint32_t)strlen(s)); }
@@ -120,6 +128,12 @@ static void command(const can_cmd_t *q, uint32_t now_ms)
         bsp_can_clear_stats();
         cmd_result(1, "statistics cleared");
         break;
+#if BMS_SAFETY
+    case CAN_CMD_ECU_HANG:
+        if (q->value != CAN_CMD_UNLOCK) { cmd_result(0, "hang: wrong unlock value"); break; }
+        cmd_result(1, "hanging (watchdog test)");
+        for (;;) { }                                  /* IWDG ~100 ms sonra sıfırlar */
+#endif
     default:
         if (q->cmd >= 0x10u && q->cmd <= 0x1Fu) { n_cmd_emu++; put_s(": EMU command, ignored\r\n"); }
         else cmd_result(0, "unknown command");
@@ -136,9 +150,29 @@ void ecu_run(void)
     uint8_t cnt_ctrl = 0, cnt_stat = 0, cmd_have = 0, cmd_cnt = 0;
     uint32_t now_ms = 0, t_last, deadline_ms = 0, tx_ok = 0;
     float soh = 1.0f;
+#if BMS_SAFETY
+    const bsp_reset_t rst = bsp_reset_cause();        /* bayraklar okunup temizlenir */
+#endif
 
     for (int k = 0; k < 6; k++) { bsp_led_toggle(); bsp_delay_ms(150); }
     put_s("\r\n=== BMS ECU: CAN 0x101/0x102 -> bms_step -> 0x201/0x202, 0x301 commands, 500 kbit/s ===\r\n");
+#if BMS_SAFETY
+    {   /* adım 6: reset nedeni ve flash imajı CRC'si; watchdog reseti ya da CRC hatası -> SAFE-STOP */
+        uint32_t crc, len;
+        const uint32_t t0 = bsp_cycles();
+        const bsp_crc_t c = bsp_flash_crc_check(&crc, &len);
+        const uint32_t us = (bsp_cycles() - t0) / (BSP_CPU_HZ / 1000000u);
+        put_s("safety: reset cause: ");  put_s(bsp_reset_name(rst));
+        kv(" | flash image ", len);  put_s(" B, CRC 0x");
+        for (int b = 3; b >= 0; b--) put_x8((uint8_t)(crc >> (8 * b)));
+        put_s(": ");  put_s(bsp_crc_name(c));  kv(" (", us);  put_s(" us)");
+        kv(" | IWDG ", BSP_IWDG_TIMEOUT_MS);  put_s(" ms\r\n");
+        if (rst == RST_IWDG)  { boot_safe = 1;  boot_reason = " WDG-RESET";  put_s("WDG reset -> SAFE-STOP\r\n"); }
+        if (c == CRC_MISMATCH || c == CRC_LEN_MISMATCH) {
+            boot_safe = 1;  boot_reason = " FLASH-CRC";  put_s("flash CRC error -> SAFE-STOP\r\n");
+        }
+    }
+#endif
     bms_init(&bms, SOC0_EKF, 1.0f, 1.0f, 0.0f, 0.0f);
     memset(&out, 0, sizeof(out));
     bsp_can_init_normal();
@@ -147,12 +181,18 @@ void ecu_run(void)
      * (0.9 s) birkaç ms'de "yetişir"; bu sırada gelen ilk çerçeve (EMU'nun ACK alamayıp beklettiği)
      * hemen ~900 ms yaşlanır ve izleyici açılışta SAFE'e kilitlenir. */
     t_last = bsp_cycles();
+#if BMS_SAFETY
+    bsp_iwdg_start();                                 /* ~100 ms; döngü her 1 ms besler */
+#endif
 
     for (;;) {
         /* 1 ms'lik adımlarla zaman (DWT taşması 25 s'de bir; fark hesabı taşmaya dayanıklı) */
         while (bsp_cycles() - t_last < BSP_CPU_HZ / 1000u) { }
         t_last += BSP_CPU_HZ / 1000u;
         now_ms++;
+#if BMS_SAFETY
+        bsp_iwdg_kick();
+#endif
 
         /* ---- her 1 ms: alım ---- */
         {
@@ -189,7 +229,8 @@ void ecu_run(void)
         const uint8_t have = have_m1 && have_m2, fresh = fresh_m1 && fresh_m2;
         const uint8_t late = have && (int32_t)(now_ms - deadline_ms) >= 0;
         if (have ? (fresh || late) : (now_ms % 100u == 0)) {
-            const uint8_t can_ok = !(mon[R_M1].safe || mon[R_M2].safe);
+            /* boot_safe (watchdog reseti / flash CRC) da CAN_ok gibi sert sınır: SAFE-STOP, kalıcı */
+            const uint8_t can_ok = !(mon[R_M1].safe || mon[R_M2].safe) && !boot_safe;
             can_ctrl_t ctrl;
             uint8_t d[8], send_stat = 0, send_ctrl = 0;
 
@@ -231,7 +272,7 @@ void ecu_run(void)
         if (now_ms % 1000u == 0) {
             bsp_can_err_t e;
             bsp_can_errors(&e);
-            kv("t=", now_ms / 1000u); put_s("s ");
+            kv("t=", now_ms / 1000u); put_s("s");  put_s(boot_reason);  put_s(" ");
             if (stepped) {
                 put_s(state_name(out.dec.state));
                 kf(" SOC ", 100.0f * out.soc);        kf("% Idis ", out.dec.i_allow_dis);

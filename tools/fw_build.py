@@ -10,6 +10,8 @@ Kullanım:
   python tools/fw_build.py --app 1 --opt O0 --flash      # PIL, -O0, derle + yükle + sıfırla
   python tools/fw_build.py --app 4 --flash               # varsayılan ECU yazılımını geri yükle
   python tools/fw_build.py --app 4 --define FOO=1        # ek derleme bayrağı
+  python tools/fw_build.py --app 4 --define BMS_SAFETY=1 --flash --crc-ref
+                                                         # adım 6: IWDG + flash CRC (referans son sayfaya yazılır)
 Çıktı: build/app<N>_<opt>[_<define>]/ (git dışı). CubeIDE'de hata ayıklama oturumu açıkken yükleme çalışmaz.
 """
 import argparse
@@ -74,10 +76,43 @@ def build(app, opt, defines):
     return elf
 
 
-def flash(elf):
+CRC_REF_ADDR = 0x0801F800          # bsp_safety.h: BSP_CRC_REF_ADDR (son flash sayfası)
+CRC_REF_MAGIC = 0x31435243         # "CRC1"
+
+
+def crc32_mpeg2_words(data):
+    """STM32 CRC birimi varsayılanı: poly 0x04C11DB7, init 0xFFFFFFFF, yansıtma yok, 32 bit kelime."""
+    crc = 0xFFFFFFFF
+    for i in range(0, len(data), 4):
+        crc ^= int.from_bytes(data[i:i + 4], "little")
+        for _ in range(32):
+            crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF if crc & 0x80000000 else (crc << 1) & 0xFFFFFFFF
+    return crc
+
+
+def crc_reference(elf):
+    """İmajın (0x08000000'dan itibaren) CRC referans bloğunu üretir: magic, uzunluk, crc."""
+    objcopy = tool(r"*gnu-tools-for-stm32*\tools\bin\arm-none-eabi-objcopy.exe")
+    binf = elf[:-4] + ".bin"
+    run([objcopy, "-O", "binary", elf, binf])
+    img = open(binf, "rb").read()
+    n = len(img)
+    padded = img + b"\xFF" * ((-n) % 4)            # sayfanın kalanı silinmiş flash (0xFF)
+    crc = crc32_mpeg2_words(padded)
+    ref = os.path.join(os.path.dirname(elf), "crc_ref.bin")
+    with open(ref, "wb") as f:
+        f.write(CRC_REF_MAGIC.to_bytes(4, "little") + n.to_bytes(4, "little") + crc.to_bytes(4, "little"))
+    print(f"CRC reference: image {n} B, CRC 0x{crc:08X} -> 0x{CRC_REF_ADDR:08X}")
+    return ref
+
+
+def flash(elf, crc_ref=False):
     cli = tool(r"*cubeprogrammer*\tools\bin\STM32_Programmer_CLI.exe")
-    out = run([cli, "-c", "port=SWD", "mode=UR", "-w", elf, "-v", "-rst"])
-    ok = "File download complete" in out and ("Download verified successfully" in out or "verified" in out)
+    cmd = [cli, "-c", "port=SWD", "mode=UR", "-w", elf, "-v"]
+    if crc_ref:
+        cmd += ["-w", crc_reference(elf), hex(CRC_REF_ADDR), "-v"]
+    out = run(cmd + ["-rst"])
+    ok = out.count("File download complete") == (2 if crc_ref else 1) and "verified" in out
     print("flash:", "OK (written, verified, reset)" if ok else "UNEXPECTED OUTPUT\n" + out[-600:])
     if not ok:
         sys.exit(1)
@@ -89,7 +124,9 @@ if __name__ == "__main__":
     ap.add_argument("--opt", default="O2", choices=["O0", "O1", "O2", "O3", "Os"])
     ap.add_argument("--define", action="append", default=[], help="extra -D (repeatable)")
     ap.add_argument("--flash", action="store_true")
+    ap.add_argument("--crc-ref", action="store_true",
+                    help="also write the flash-image CRC reference (BMS_SAFETY boot check) to the last page")
     a = ap.parse_args()
     e = build(a.app, a.opt, a.define)
     if a.flash:
-        flash(e)
+        flash(e, a.crc_ref)
