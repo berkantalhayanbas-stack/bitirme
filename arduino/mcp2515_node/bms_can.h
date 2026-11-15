@@ -13,7 +13,15 @@
 #define CAN_ID_PC_CMD      0x301u     /* olay mesajı: periyodik değil, zaman aşımı izlenmez */
 
 #define CAN_TIMEOUT_FAULT_MS  250u   /* 2 periyot kaçırıldı -> arıza bayrağı */
-#define CAN_TIMEOUT_SAFE_MS   500u   /* 5 periyot -> SAFE-STOP (CAN_ok = 0) */
+#define CAN_TIMEOUT_SAFE_MS   500u   /* son geçerli mesajdan 500 ms -> SAFE-STOP (CAN_ok = 0) */
+/* Sayaç kuralıyla birlikte (bms_can.c MAX_DELTA = 3) 100 ms periyotta etkin tolerans:
+ *   1-2 ardışık kayıp : dönüş çerçevesi kabul (n_lost), yalnız fault
+ *   3 kayıp           : dönüş çerçevesi reddedilir (sayaç farkı 4), sonraki kabul; 400 ms'de
+ *                       değerlendirmede yaş 497 ms < 500 -> SAFE yok (sınırda)
+ *   4 ve üstü kayıp   : dönüş çerçevesi reddedilir (fark >= 5) -> yaş 500 ms'yi geçer -> SAFE
+ * Yani pratikte 4 ardışık kayıp SAFE-STOP'a götürür (AUTOSAR E2E "wrong sequence": sıra hatalı
+ * çerçevenin verisi kullanılmaz). Bilinçli seçim; simulink/can_rx.m ve twin/can_monitor.py
+ * aynı davranışı modeller ve test eder (twin/test_can_monitor.py U3, U9). */
 /* Açılış: ilk geçerli mesaj gelene kadar zaman aşımı bu süreyle değerlendirilir (diğer düğümler
  * açılırken erken SAFE'e kilitlenmemek için; AUTOSAR COM'daki "first timeout" fikri). Süre
  * dolduğunda hâlâ mesaj yoksa doğrudan fault + SAFE. İlk mesajdan sonra 250/500 ms geçerlidir. */
@@ -50,8 +58,9 @@ typedef struct {
     uint8_t  fault, safe;       /* fault: zaman aşımı >= 250 ms; safe: >= 500 ms (kalıcı) */
 } can_monitor_t;
 void can_monitor_init(can_monitor_t *mon, uint32_t now_ms);
-/* Her alınan çerçevede: crc_ok ve sayaç ile çağrılır. Sayaç beklenen değilse (donma veya atlama)
- * çerçeve reddedilir (0 döner); kayıp çerçeve sayısı n_lost'a eklenir. */
+/* Her alınan çerçevede: crc_ok ve sayaç ile çağrılır. Sayaç farkı 1 normal; 2..MAX_DELTA arada
+ * kayıp çerçeve var ama kabul (n_lost'a eklenir); 0 (donma/tekrar) veya > MAX_DELTA (dizi hatası)
+ * reddedilir (0 döner, n_cnt_err), sayaç yeniden eşitlenir. CRC hatası da reddedilir. */
 int  can_monitor_rx(can_monitor_t *mon, uint32_t now_ms, int crc_ok, uint8_t counter);
 /* Periyodik (ör. her 10 ms): zaman aşımı kontrolü. CAN_ok = !mon->safe
  * Yalnız periyodik mesajlar (0x101, 0x102) için çağrılır; olay mesajı 0x301 için çağrılmaz.
