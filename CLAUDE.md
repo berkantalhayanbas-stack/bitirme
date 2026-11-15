@@ -29,5 +29,9 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
 
 ## Derleme
 - STM32CubeIDE, Debug (-O2) / Release (-Os). Include yolları: `Inc`, `bms/bsp`, `bms/common`, `bms/pil`, `Drivers/CMSIS/*`.
-- Komut satırından derleme/flash bu ortamda kurulu değil; değişiklikten sonra kullanıcıdan CubeIDE'de derlemesini iste.
+- Derleme ve flash kullanıcıda: değişiklikten sonra kullanıcıdan CubeIDE'de derleyip yüklemesini iste (Arduino sketch'leri için Arduino IDE).
+  Makefile'lar (`Debug/*.mk`, `objects.list`) CubeIDE'nin ürettiği dosyalar; komut satırından `make` yeni kaynak dosyalarını görmez, bu yüzden derleme için kullanma.
+- STM32_Programmer_CLI kurulu: `C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.win32_*\tools\bin\STM32_Programmer_CLI.exe`.
+  Sıfırlama (`-c port=SWD mode=HOTPLUG -rst`), hedef gerilimi ve register okuma için kullanılabilir (`can_replay.py` de sıfırlamayı bununla yapar). CubeIDE'de hata ayıklama oturumu açıkken ST-LINK'e bağlanamaz.
+- Seri portlar: COM9 = STM32 ST-LINK VCP (LPUART1), COM10 = Arduino Uno (CH340). Porttan okumadan önce Arduino IDE'deki Serial Monitor kapatılmalı.
 - Git: `main` dalı. `git` PATH'te olmayabilir; `C:\Program Files\Git\cmd\git.exe` kullan.
