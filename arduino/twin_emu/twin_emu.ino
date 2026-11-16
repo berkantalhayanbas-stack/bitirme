@@ -303,11 +303,12 @@ void vehicleStep()
 /* ---------------------------------------------------------------- 10 Hz adım */
 void step(uint32_t now)
 {
-  static uint8_t tick = 0;
+  static uint8_t tick = 0, first = 1;
   readInputs(tick);
   if (++tick >= 10) tick = 0;
   vehicleStep();
   tw.t_amb = t_amb;
+  if (first) { tw.tc = tw.ts = t_amb; first = 0; }   /* paket ortam sıcaklığında başlar */
   twin_step(&tw, I_act);
   sendMeasurements(now);
   can_monitor_tick(&mon_status, now);
