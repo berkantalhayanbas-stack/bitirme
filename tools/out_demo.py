@@ -26,7 +26,7 @@ ap.add_argument("--limp", type=float, default=15.0, help="LIMP süresi [s]")
 ap.add_argument("--safe", type=float, default=10.0, help="SAFE süresi [s]")
 a = ap.parse_args()
 
-PAT = re.compile(r"t=(\d+)s (\w+).*?Idis\s+([\d.]+).*?OUT low set ([\d.]+)%.*?high set ([\d.]+)%.*?K (\d)")
+PAT = re.compile(r"t=(\d+)s (\w+).*?Idis\s+([\d.]+).*?OUT low set ([\d.]+)%.*?high set ([\d.]+)%.*?K (\d)(?: \w+ pin (\d))?")
 stop = False
 
 
@@ -43,10 +43,11 @@ def ecu_reader(s):
             ln, buf = buf.split(b"\n", 1)
             m = PAT.search(ln.decode(errors="replace"))
             if m:
-                t, st, idis, lo, hi, k = m.groups()
+                t, st, idis, lo, hi, k, pin = m.groups()
                 print(f"  t={int(t):3d}s  {st:<6}  I_izin {float(idis):5.1f} A   "
                       f"kisa [{bar(lo)}] {float(lo):5.1f}%   uzun [{bar(hi)}] {float(hi):5.1f}%   "
-                      f"role {'CEKTI (yesil yanar)' if k == '1' else 'BIRAKTI (sonuk)'}", flush=True)
+                      f"role {'CEKTI (yesil yanar)' if k == '1' else 'BIRAKTI (sonuk)'}"
+                      + (f"  PB5={pin}" if pin else ""), flush=True)
 
 
 def banner(text):

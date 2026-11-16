@@ -11,8 +11,15 @@ void bsp_out_init(void)
     RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
     (void)RCC->APB2ENR;
 
+#if BSP_OUT_K_OPEN_DRAIN
+    /* PB5: önce açık-akaçlı + ODR 1 (yüksek empedans), sonra çıkış -> açılışta röle çekmez */
+    GPIOB->OTYPER |= 1u << 5;
+    GPIOB->BSRR = 1u << 5;
+#else
     /* PB5: önce 0, sonra çıkış (push-pull) -> açılışta röle çekmez */
+    GPIOB->OTYPER &= ~(1u << 5);
     GPIOB->BSRR = 1u << (5 + 16);
+#endif
     GPIOB->MODER = (GPIOB->MODER & ~(3u << (5 * 2))) | (1u << (5 * 2));
 
     /* TIM1: PWM mod 1, önyüklemeli; CCR = 0 -> çıkışlar düşük */
@@ -41,10 +48,13 @@ static uint32_t ccr(float d)
 }
 
 void bsp_out_set(float duty_low, float duty_high, uint8_t contactor)
-{
-    TIM1->CCR1 = ccr(duty_low);
+{    TIM1->CCR1 = ccr(duty_low);
     TIM1->CCR2 = ccr(duty_high);
+#if BSP_OUT_K_OPEN_DRAIN
+    GPIOB->BSRR = contactor ? (1u << (5 + 16)) : (1u << 5);     /* çekili = 0 V, açık = bırak */
+#else
     GPIOB->BSRR = contactor ? (1u << 5) : (1u << (5 + 16));
+#endif
 }
 
 void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m)
@@ -66,5 +76,6 @@ void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m)
     /* frekans = (kenar sayısı - 1) periyot / ilk..son kenar arası süre; %0 / %100'de 0 Hz */
     m->f_low_hz  = r8 > 1u ? (uint32_t)((uint64_t)(r8 - 1u) * BSP_CPU_HZ / (b8 - a8)) : 0u;
     m->f_high_hz = r9 > 1u ? (uint32_t)((uint64_t)(r9 - 1u) * BSP_CPU_HZ / (b9 - a9)) : 0u;
-    m->contactor = (uint8_t)((GPIOB->ODR >> 5) & 1u);
+    m->contactor = (uint8_t)(((GPIOB->ODR >> 5) & 1u) ^ (BSP_OUT_K_OPEN_DRAIN ? 1u : 0u));
+    m->k_pin = (uint8_t)((GPIOB->IDR >> 5) & 1u);
 }

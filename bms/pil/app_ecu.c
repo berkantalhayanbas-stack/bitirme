@@ -379,6 +379,7 @@ void ecu_run(void)
                 kv("% ", om.f_low_hz);  kf("Hz | high set ", 100.0f * out_high);
                 kf("% meas ", 100.0f * om.d_high);  kv("% ", om.f_high_hz);
                 kv("Hz | K ", om.contactor);  put_s(om.contactor ? " closed" : " open");
+                kv(" pin ", om.k_pin);                    /* PB5 gerçek seviye (IDR) */
             }
 #endif
             put_s("\r\n");
