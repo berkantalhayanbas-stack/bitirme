@@ -3,6 +3,11 @@
  *   0x101 (V, I, T) + 0x102 (V_min, V_max, T_amb)  ->  bms_step  ->  0x201 (I_allow, durum, neden)
  *                                                                    0x202 (SOC, Tc, SOH, psi)
  *   0x301 (PC komutu, olay mesajı)                   ->  ECU komutları 0x01-0x03 (bms_can.h)
+ *   0x110-0x114 (19 grup gerilimi)                   ->  bal_step (bms_bal.c) -> 0x210 (dengeleme)
+ *
+ *   Adım 8: hücre çerçeveleri ayrı izleyicilerle izlenir; eski/eksikse yalnız dengeleme kapanır
+ *   (CAN_ok'a girmez, mcp2515_node / köprü gibi hücre göndermeyen EMU'larla da çalışır).
+ *   0x210 her BMS adımında 0x201 ve 0x202'den sonra gönderilir.
  *
  *   her 1 ms  : alınan çerçeveleri çöz (CRC + sayaç); yeni ölçüm çifti geldiyse bir bms_step,
  *               0x201 ve 0x202 gönder; 0x301 komutunu hemen işle
@@ -40,6 +45,7 @@
 #include "bsp_can.h"
 #include "bms_config.h"
 #include "bms_algo.h"
+#include "bms_bal.h"
 #include "bms_can.h"
 #ifndef BMS_SAFETY
 #define BMS_SAFETY 0                         /* 1: IWDG + flash CRC + reset nedeni (adım 6) */
@@ -73,10 +79,33 @@ static uint8_t have_m1;
 static uint32_t n_hold, other, tx_busy, cyc_max;
 static uint32_t n_cmd, n_cmd_rej, n_cmd_emu, n_cmd_crc, n_cmd_dup;
 static uint8_t boot_safe;                    /* BMS_SAFETY: watchdog reseti ya da flash CRC hatası */
+/* adım 8: grup gerilimleri (0x110-0x114) ve pasif dengeleme (0x210) */
+static can_monitor_t mon_cell[CAN_N_CELL_FRAMES];
+static float   vcell[BMS_NS];
+static uint8_t cell_valid[CAN_N_CELL_FRAMES], cell_fb[CAN_N_CELL_FRAMES];
+static bal_t   bal;
+
+/* Tüm hücre çerçeveleri taze (< 250 ms) ve 19 grubun hepsi geçerli mi */
+static uint8_t cells_ok(void)
+{
+    for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) {
+        const uint8_t need = (uint8_t)(k == CAN_N_CELL_FRAMES - 1u ? 0x7u : 0xFu);   /* 19 = 4 x 4 + 3 */
+        if (!mon_cell[k].have_counter || mon_cell[k].fault || (cell_valid[k] & need) != need) return 0;
+    }
+    return 1;
+}
+/* EMU'nun geri bildirdiği açık anahtarlar (19 bit) */
+static uint32_t cells_fb(void)
+{
+    uint32_t m = 0;
+    for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) m |= (uint32_t)cell_fb[k] << (4u * k);
+    return m & 0x7FFFFu;
+}
 static const char *boot_reason = "";
 
 /* ---------------------------------------------------------------- metin çıktısı (printf yok) */
-static void put_s(const char *s) { bsp_uart_write((const uint8_t *)s, (uint32_t)strlen(s)); }
+/* kesmeli (bloklamayan): rapor yazılırken CAN alımı durmasın */
+static void put_s(const char *s) { (void)bsp_uart_write_async((const uint8_t *)s, (uint32_t)strlen(s)); }
 static void put_u(uint32_t v)
 {
     char b[11];
@@ -167,7 +196,7 @@ static void command(const can_cmd_t *q, uint32_t now_ms)
         if (q->value != CAN_CMD_UNLOCK)                    cmd_result(0, "restart: wrong unlock value");
         else if (!fresh)                                   cmd_result(0, "restart: current unknown (no fresh 0x101)");
         else if (fabsf(m1.I) >= CAN_CMD_RESTART_I_A)       cmd_result(0, "restart: current flowing");
-        else { cmd_result(1, "restarting"); bsp_reset(); }
+        else { cmd_result(1, "restarting"); bsp_uart_write((const uint8_t *)"", 0); bsp_reset(); }   /* kuyruğu boşalt */
         break;
     }
     case CAN_CMD_ECU_SET_SOC:
@@ -177,6 +206,9 @@ static void command(const can_cmd_t *q, uint32_t now_ms)
         break;
     case CAN_CMD_ECU_CLR_STATS:
         for (int m = 0; m < N_RX; m++) { mon[m].n_crc_err = 0; mon[m].n_cnt_err = 0; mon[m].n_lost = 0; }
+        for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) {
+            mon_cell[k].n_crc_err = 0; mon_cell[k].n_cnt_err = 0; mon_cell[k].n_lost = 0;
+        }
         n_hold = 0; other = 0; tx_busy = 0; cyc_max = 0;
         n_cmd_rej = 0; n_cmd_emu = 0; n_cmd_crc = 0; n_cmd_dup = 0;
         bsp_can_clear_stats();
@@ -201,7 +233,7 @@ void ecu_run(void)
     can_meas2_t m2 = { 0 };
     bms_out_t out;
     uint8_t have_m2 = 0, fresh_m1 = 0, fresh_m2 = 0, stepped = 0;
-    uint8_t cnt_ctrl = 0, cnt_stat = 0, cmd_have = 0, cmd_cnt = 0;
+    uint8_t cnt_ctrl = 0, cnt_stat = 0, cnt_bal = 0, cmd_have = 0, cmd_cnt = 0;
     uint32_t now_ms = 0, t_last, deadline_ms = 0, tx_ok = 0;
     float soh = 1.0f;
 #if BMS_SAFETY
@@ -234,6 +266,8 @@ void ecu_run(void)
     bsp_out_init();                                   /* farlar sönük, kontaktör açık */
 #endif
     for (int m = 0; m < N_RX; m++) can_monitor_init(&mon[m], 0);
+    for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) can_monitor_init(&mon_cell[k], 0);
+    bal_init(&bal);
     /* Zaman tabanı CAN açıldıktan SONRA alınır: önceden alınırsa döngü açılıştaki LED süresini
      * (0.9 s) birkaç ms'de "yetişir"; bu sırada gelen ilk çerçeve (EMU'nun ACK alamayıp beklettiği)
      * hemen ~900 ms yaşlanır ve izleyici açılışta SAFE'e kilitlenir. */
@@ -264,6 +298,15 @@ void ecu_run(void)
                     can_meas2_t b;
                     const int ok = can_decode_meas2(d, &b, &c);
                     if (can_monitor_rx(&mon[R_M2], now_ms, ok, c)) { m2 = b;  have_m2 = 1;  fresh_m2 = 1; }
+                } else if (id >= CAN_ID_EMU_CELL0 && id < CAN_ID_EMU_CELL0 + CAN_N_CELL_FRAMES) {
+                    const uint8_t k = (uint8_t)(id - CAN_ID_EMU_CELL0);
+                    can_cell_t g;
+                    const int ok = can_decode_cell(k, d, &g, &c);
+                    if (can_monitor_rx(&mon_cell[k], now_ms, ok, c)) {
+                        for (uint32_t j = 0; j < CAN_CELLS_PER_FRAME && 4u * k + j < BMS_NS; j++)
+                            vcell[4u * k + j] = g.v[j];
+                        cell_valid[k] = g.valid;  cell_fb[k] = g.bal;
+                    }
                 } else if (id == CAN_ID_PC_CMD) {           /* olay mesajı: CRC + tekrar kontrolü */
                     can_cmd_t q;
                     if (!can_decode_cmd(d, &q, &c))         n_cmd_crc++;
@@ -279,6 +322,7 @@ void ecu_run(void)
         if (now_ms % 10u == 0) {
             (void)bsp_can_service(now_ms);
             for (int m = 0; m < N_RX; m++) can_monitor_tick(&mon[m], now_ms);
+            for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) can_monitor_tick(&mon_cell[k], now_ms);
         }
 
         /* ---- BMS adımı ve gönderim: yeni ölçüm çifti gelince (ya da gecikince tutulan değerle);
@@ -325,6 +369,13 @@ void ecu_run(void)
                 can_encode_status(&st, cnt_stat, d);
                 if (bsp_can_send(CAN_ID_ECU_STATUS, d, 8)) { tx_ok++; cnt_stat = (cnt_stat + 1u) & 0x0Fu; }
                 else tx_busy++;
+                /* adım 8: dengeleme kararı (bms_step'ten bağımsız; PIL/SIL zincirini değiştirmez) */
+                const uint8_t v_ok = cells_ok();
+                const can_bal_t bm = { bal_step(&bal, vcell, v_ok, m1.I, out.dec.state, out.tc),
+                                       bal.flags, v_ok ? bal.v_max - bal.v_min : 0.0f };
+                can_encode_bal(&bm, cnt_bal, d);
+                if (bsp_can_send(CAN_ID_ECU_BAL, d, 8)) { tx_ok++; cnt_bal = (cnt_bal + 1u) & 0x0Fu; }
+                else tx_busy++;
             }
 #if BMS_TELEMETRY
             /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
@@ -370,10 +421,26 @@ void ecu_run(void)
                 kv("(rej", n_cmd_rej); kv(" emu", n_cmd_emu); kv(" crc", n_cmd_crc); kv(" dup", n_cmd_dup);
                 put_s(")");
             }
+            {   /* adım 8: hücre çerçeveleri ve dengeleme */
+                uint32_t n = 0, e8 = 0;
+                for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) {
+                    n += mon_cell[k].n_ok;
+                    e8 += mon_cell[k].n_crc_err + mon_cell[k].n_cnt_err + mon_cell[k].n_lost;
+                }
+                kv(" | cell:", n);
+                if (e8) { kv("(err ", e8); put_s(")"); }
+                const uint32_t fb = cells_fb();
+                put_s(" bal 0x"); put_x8((uint8_t)(bal.mask >> 16)); put_x8((uint8_t)(bal.mask >> 8)); put_x8((uint8_t)bal.mask);
+                put_s(" fb 0x");  put_x8((uint8_t)(fb >> 16));       put_x8((uint8_t)(fb >> 8));       put_x8((uint8_t)fb);
+                kv(" f", bal.flags);
+                kf(" dV ", 1000.0f * (bal.v_max - bal.v_min));  put_s("mV");
+                kf(" Vmin ", 1000.0f * bal.v_min);
+            }
             kv(" | tx ok:", tx_ok); kv(" busy:", tx_busy);
             kv(" | TEC ", e.tec); kv(" REC ", e.rec); kv(" LEC ", e.lec);
             put_s(e.bo ? " BUS-OFF" : e.ep ? " PASSIVE" : e.ew ? " WARN" : " ACTIVE");
             kv(" bo#", e.n_busoff); kv(" lost#", e.n_rx_lost);
+            if (bsp_uart_tx_drops()) kv(" uart_drop ", bsp_uart_tx_drops());
 #if BMS_OUTPUTS
             {   /* pin seviyesinde doğrulama (20 ms örnekleme): set edilen ve ölçülen */
                 bsp_out_meas_t om;

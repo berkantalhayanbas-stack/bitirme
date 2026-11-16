@@ -35,10 +35,14 @@ static void put16(uint8_t *d, int pos, int32_t v) { d[pos] = (uint8_t)(v & 0xFF)
 static uint16_t getu16(const uint8_t *d, int pos) { return (uint16_t)(d[pos] | (d[pos + 1] << 8)); }
 static int16_t gets16(const uint8_t *d, int pos) { return (int16_t)getu16(d, pos); }
 
+static void finish_hi(uint16_t id, uint8_t counter, uint8_t hi, uint8_t d[8])
+{
+    d[6] = (uint8_t)((counter & 0x0F) | (hi << 4));
+    d[7] = frame_crc(id, d);
+}
 static void finish(uint16_t id, uint8_t counter, uint8_t d[8])
 {
-    d[6] = (uint8_t)(counter & 0x0F);       /* üst 4 bit ayrılmış (0) */
-    d[7] = frame_crc(id, d);
+    finish_hi(id, counter, 0, d);           /* üst 4 bit ayrılmış (0) */
 }
 static int check(uint16_t id, const uint8_t d[8], uint8_t *counter)
 {
@@ -85,6 +89,36 @@ void can_encode_cmd(const can_cmd_t *m, uint8_t counter, uint8_t d[8])
     d[3] = d[4] = d[5] = 0;
     finish(CAN_ID_PC_CMD, counter, d);
 }
+/* 12 bitlik iki yuva 3 bayta: a = bit 0..11, b = bit 12..23 */
+static void put12x2(uint8_t *d, uint16_t a, uint16_t b)
+{
+    d[0] = (uint8_t)(a & 0xFF);
+    d[1] = (uint8_t)(((a >> 8) & 0x0F) | ((b & 0x0F) << 4));
+    d[2] = (uint8_t)(b >> 4);
+}
+static uint16_t get12(const uint8_t *d, int j)       /* yuva j = 0..3 */
+{
+    const uint8_t *p = d + 3 * (j >> 1);
+    return (j & 1) ? (uint16_t)((p[1] >> 4) | (p[2] << 4)) : (uint16_t)(p[0] | ((p[1] & 0x0F) << 8));
+}
+void can_encode_cell(uint8_t k, const can_cell_t *m, uint8_t counter, uint8_t d[8])
+{
+    uint16_t r[CAN_CELLS_PER_FRAME];
+    for (int j = 0; j < (int)CAN_CELLS_PER_FRAME; j++)
+        r[j] = (m->valid >> j & 1u) ? (uint16_t)sat_round(m->v[j] - 1.0f, 0.001f, 0, 0xFFE) : 0xFFFu;
+    put12x2(d, r[0], r[1]);
+    put12x2(d + 3, r[2], r[3]);
+    finish_hi((uint16_t)(CAN_ID_EMU_CELL0 + k), counter, (uint8_t)(m->bal & 0x0F), d);
+}
+void can_encode_bal(const can_bal_t *m, uint8_t counter, uint8_t d[8])
+{
+    d[0] = (uint8_t)(m->mask & 0xFF);
+    d[1] = (uint8_t)((m->mask >> 8) & 0xFF);
+    d[2] = (uint8_t)((m->mask >> 16) & 0x07);
+    d[3] = m->flags;
+    put16(d, 4, sat_round(m->dv, 0.0001f, 0, 65535));
+    finish(CAN_ID_ECU_BAL, counter, d);
+}
 
 /* ---------------------------------------------------------------- çözme */
 int can_decode_meas1(const uint8_t d[8], can_meas1_t *m, uint8_t *counter)
@@ -117,6 +151,26 @@ int can_decode_cmd(const uint8_t d[8], can_cmd_t *m, uint8_t *counter)
 {
     if (!check(CAN_ID_PC_CMD, d, counter)) return 0;
     m->cmd = d[0];  m->value = (int16_t)(d[1] | (d[2] << 8));
+    return 1;
+}
+int can_decode_cell(uint8_t k, const uint8_t d[8], can_cell_t *m, uint8_t *counter)
+{
+    if (!check((uint16_t)(CAN_ID_EMU_CELL0 + k), d, counter)) return 0;
+    m->valid = 0;
+    for (int j = 0; j < (int)CAN_CELLS_PER_FRAME; j++) {
+        const uint16_t r = get12(d, j);
+        m->v[j] = 1.0f + 0.001f * r;
+        if (r != 0xFFFu) m->valid |= (uint8_t)(1u << j);
+    }
+    m->bal = (uint8_t)(d[6] >> 4);
+    return 1;
+}
+int can_decode_bal(const uint8_t d[8], can_bal_t *m, uint8_t *counter)
+{
+    if (!check(CAN_ID_ECU_BAL, d, counter)) return 0;
+    m->mask = (uint32_t)d[0] | ((uint32_t)d[1] << 8) | ((uint32_t)(d[2] & 0x07) << 16);
+    m->flags = d[3];
+    m->dv = 0.0001f * getu16(d, 4);
     return 1;
 }
 

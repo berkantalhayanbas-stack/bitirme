@@ -18,6 +18,10 @@ void     bsp_led_toggle(void);
 void     bsp_delay_ms(uint32_t ms);
 uint32_t bsp_cycles(void);                        /* DWT->CYCCNT */
 void     bsp_uart_write(const uint8_t *buf, uint32_t n);
+/* Bloklamayan gönderim: 2 KB halka tampon + TXE kesmesi; döner = kuyruğa giren bayt (dolu ise
+ * kalan atılır, bsp_uart_tx_drops sayar). bsp_uart_write önce bu kuyruğun boşalmasını bekler. */
+uint32_t bsp_uart_write_async(const uint8_t *buf, uint32_t n);
+uint32_t bsp_uart_tx_drops(void);
 void     bsp_uart_read(uint8_t *buf, uint32_t n);  /* n bayt gelene kadar bekler */
 void     bsp_reset(void);                         /* yazılımla sistem sıfırlaması (geri dönmez) */
 

@@ -38,6 +38,9 @@
  *   SFID1[26:16], SFID2[10:0] */
 #define SFE_DUAL_FIFO0(id1, id2)  ((1u << 30) | (1u << 27) | (((uint32_t)(id1) & 0x7FFu) << 16) \
                                    | ((uint32_t)(id2) & 0x7FFu))
+/* SFT = 00: aralık filtresi, SFID1 <= kimlik <= SFID2 kabul */
+#define SFE_RANGE_FIFO0(lo, hi)   ((0u << 30) | (1u << 27) | (((uint32_t)(lo) & 0x7FFu) << 16) \
+                                   | ((uint32_t)(hi) & 0x7FFu))
 
 /* RXGFC: ANFS/ANFE = 10 eşleşmeyen std/ext çerçeveyi reddet, RRFS/RRFE = 1 uzak çerçeveleri reddet */
 #define RXGFC_REJECT_ALL  ((2u << FDCAN_RXGFC_ANFS_Pos) | (2u << FDCAN_RXGFC_ANFE_Pos) \
@@ -112,7 +115,8 @@ static void can_init(int mode)
         volatile uint32_t *fls = (volatile uint32_t *)RAM_FLS;
         fls[0] = SFE_DUAL_FIFO0(ids[0], ids[1]);
         fls[1] = SFE_DUAL_FIFO0(ids[2], ids[2]);
-        FDCAN1->RXGFC = RXGFC_REJECT_ALL | (2u << FDCAN_RXGFC_LSS_Pos);   /* 2 std filtre elemanı */
+        fls[2] = SFE_RANGE_FIFO0(BSP_CAN_FILTER_RANGE_LO, BSP_CAN_FILTER_RANGE_HI);
+        FDCAN1->RXGFC = RXGFC_REJECT_ALL | (3u << FDCAN_RXGFC_LSS_Pos);   /* 3 std filtre elemanı */
     }
 
     FDCAN1->IR = 0xFFFFFFFFu;                                 /* eski kesme bayraklarını temizle */

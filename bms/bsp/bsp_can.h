@@ -9,7 +9,8 @@
  *   bsp_can_init_loopback_filtered()  aynı, ama normal moddaki kabul filtresiyle (filtre testi)
  *   bsp_can_init_normal()     gerçek hat: PA11 = FDCAN1_RX, PA12 = FDCAN1_TX (AF9), harici
  *                             transceiver gerekir. TEST/LBCK/MON kapalı. Kabul filtresi:
- *                             yalnızca 0x101, 0x102, 0x301 (diğer std/ext ve uzak çerçeveler reddedilir).
+ *                             yalnızca 0x101, 0x102, 0x301 ve 0x110-0x114 (diğer std/ext ve uzak
+ *                             çerçeveler reddedilir).
  *
  * Bus-off: denetleyici bus-off olunca CCCR.INIT'i kendisi 1 yapar ve hattan çekilir.
  * bsp_can_service(now_ms) periyodik çağrılır (ör. her 10 ms). Bus-off görürse bekleme süresi
@@ -28,8 +29,10 @@
 #define BSP_CAN_BO_FAST_N      5u
 #define BSP_CAN_BO_SLOW_MS  1000u
 
-/* Kabul filtresindeki kimlikler (normal mod ve filtreli loopback) */
+/* Kabul filtresindeki kimlikler (normal mod ve filtreli loopback) + hücre gerilimi aralığı */
 #define BSP_CAN_FILTER_IDS  { 0x101u, 0x102u, 0x301u }
+#define BSP_CAN_FILTER_RANGE_LO  0x110u
+#define BSP_CAN_FILTER_RANGE_HI  0x114u
 
 typedef struct {
     /* anlık durum (ECR, PSR) */

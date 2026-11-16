@@ -7,23 +7,23 @@
  * Parametreler bms/common/bms_config.h, simulink/bms_param_struct.m ve twin/battery_model.py ile
  * AYNI olmalı; biri değişirse burası da değişmeli.
  *
- * Hücre grupları: TW_NG adet seri grup simüle edilir; paket gerilimi = (19 / TW_NG) x toplam.
- * TW_NG = 1 -> tüm gruplar özdeş (Python PackTwin). HIL adım 8'de TW_NG = 19 yapılıp her gruba
- * kq (kapasite) / kr (direnç) dağılımı verilecek; grup başına 20 bayt RAM (19 grup ~380 B).
+ * Hücre grupları (HIL adım 8): 19 seri grubun her biri ayrı SOC / RC durumu taşır. Gruplar arası
+ * fark twin_model.c'deki sabit tabloyla verilir (kapasite, direnç, başlangıç SOC sapması; grup 7
+ * "zayıf": -%5 kapasite, +%15 direnç, closed_loop.py'deki zayıf grubun hafifi). Pasif dengeleme:
+ * maskede biti 1 olan grubun 12 hücresinden toplam i_bleed çekilir (direnç ısısı hücreye girmez).
  * Termal model ortalama hücre için tektir (gruplar arası sıcaklık farkı modellenmez).
  */
 #ifndef TWIN_MODEL_H
 #define TWIN_MODEL_H
 #include <stdint.h>
 
-#define TW_NG       1           /* simüle edilen seri grup sayısı (adım 8: 19) */
+#define TW_NG       19          /* seri grup sayısı */
 #define TW_NS       19
 #define TW_NP       12
 
 typedef struct {
     float soc, v1, v2;          /* durum: SOC, RC1 ve RC2 gerilimleri (hücre) */
-    float kq, kr;               /* kapasite ve direnç çarpanı (1 = nominal) */
-    float v;                    /* son adımdaki hücre uç gerilimi */
+    float v;                    /* son adımdaki grup (hücre) uç gerilimi */
 } tw_group_t;
 
 typedef struct {
@@ -33,11 +33,15 @@ typedef struct {
     float a1, a2, dt;           /* RC ayrıklaştırma katsayıları (ZOH) */
     float v_pack, v_min, v_max; /* çıktı: paket gerilimi, en düşük / en yüksek grup gerilimi */
     float soc_avg;              /* çıktı: grup SOC ortalaması */
+    float soc_min, soc_max;     /* çıktı: en düşük / en yüksek grup SOC'si */
 } twin_t;
 
 void  twin_init(twin_t *tw, float soc0, float t_amb, float dt);
-void  twin_set_soc(twin_t *tw, float soc);
-void  twin_step(twin_t *tw, float i_pack);
+void  twin_set_soc(twin_t *tw, float soc);       /* gruplara tablo sapmasıyla birlikte yazar */
+/* bal_mask bit j = grup j+1'in dengeleme direnci açık, i_bleed = grup başına direnç akımı [A].
+ * k_soc: zaman hızlandırma, direnç akımının SOC etkisi k_soc katı (1 = gerçek). Gerilim düşümü
+ * gerçek akımla kalır: aksi hâlde dengelenen grup ECU'ya en düşük görünür ve anahtar titrer. */
+void  twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float k_soc);
 float twin_ocv(float soc);      /* hücre OCV [V] */
 
 #endif

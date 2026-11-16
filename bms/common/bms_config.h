@@ -82,4 +82,15 @@ static const float DEC_I_DIS[DEC_DS_N] = { 0.f, 2.425f, 2.425f, 7.275f, 7.275f, 
 static const float DEC_T_CHG[DEC_DS_N] = { 0.f, 2.f, 23.f, 25.f, 43.f, 45.f };
 static const float DEC_I_CHG[DEC_DS_N] = { 0.f, 1.455f, 1.455f, 3.395f, 3.395f, 0.f };
 
+/* ---------------- pasif dengeleme (bms_bal.c, HIL adım 8). Kaynak: arac_bms_analizi.md bölüm 4-5
+ * (MathWorks BMS referansı: hedef fark 10 mV, açma bekleme 60 s; sürüşte kapalı). Henüz
+ * simulink/ ve twin/ tarafında karşılığı yok. */
+#define BAL_DV_ON       0.010f      /* V_i - V_min > 10 mV -> grubun direnci açılır [V] */
+#define BAL_DV_OFF      0.005f      /* < 5 mV -> kapanır (histerezis) */
+#define BAL_I_DRIVE     2.0f        /* I > 2 A deşarj = sürüş -> dengeleme hemen kapanır [A] */
+#define BAL_T_ON        60.0f       /* koşullar bu kadar kesintisiz sağlanınca başlar [s] */
+#define BAL_V_MIN       3.40f       /* en düşük grup bunun altındaysa dengeleme yok [V] */
+#define BAL_T_MAX       45.0f       /* Tc_hat üstünde dengeleme yok (direnç ısısı) [°C] */
+#define BAL_FILT        0.1f        /* grup gerilimi alçak geçiren katsayısı (100 ms'de; tau ~1 s) */
+
 #endif

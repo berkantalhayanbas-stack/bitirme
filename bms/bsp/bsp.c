@@ -95,10 +95,40 @@ static void lpuart1_init(void)
     LPUART1->CR1 = 0;                                         /* ayar için kapalı (UE = 0) */
     LPUART1->BRR = (uint32_t)(((uint64_t)256u * BSP_CPU_HZ + BSP_BAUD / 2u) / BSP_BAUD);
     LPUART1->CR1 = USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;  /* 8N1, gönder + al + aç */
+    NVIC_EnableIRQ(LPUART1_IRQn);                             /* yalnız TXEIE açılınca (async) tetiklenir */
+}
+
+/* Kesmeli gönderim (app_ecu): halka tampon + TXE kesmesi. Bloklayan yazma, CAN Rx FIFO'su (3
+ * çerçeve) boşaltılamadan ~30 ms beklediği için hücre çerçevelerini kaybettiriyordu (adım 8). */
+#define TXQ_N 2048u
+static volatile uint8_t  txq[TXQ_N];
+static volatile uint32_t txq_h, txq_t, txq_drop;
+
+uint32_t bsp_uart_write_async(const uint8_t *buf, uint32_t n)
+{
+    uint32_t k = 0;
+    for (; k < n; k++) {
+        const uint32_t next = (txq_h + 1u) % TXQ_N;
+        if (next == txq_t) { txq_drop += n - k; break; }       /* tampon dolu: kalan atılır */
+        txq[txq_h] = buf[k];
+        txq_h = next;
+    }
+    LPUART1->CR1 |= USART_CR1_TXEIE_TXFNFIE;                  /* kesme boşalınca kendini kapatır */
+    return k;
+}
+uint32_t bsp_uart_tx_drops(void) { return txq_drop; }
+
+void LPUART_IRQHandler(void)                                  /* vektör adı başlangıç dosyasındaki gibi */
+{
+    if ((LPUART1->CR1 & USART_CR1_TXEIE_TXFNFIE) && (LPUART1->ISR & USART_ISR_TXE_TXFNF)) {
+        if (txq_t != txq_h) { LPUART1->TDR = txq[txq_t];  txq_t = (txq_t + 1u) % TXQ_N; }
+        else LPUART1->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
+    }
 }
 
 void bsp_uart_write(const uint8_t *buf, uint32_t n)
 {
+    while (txq_t != txq_h) { }                                /* sıra bozulmasın: kuyruk boşalsın */
     for (uint32_t i = 0; i < n; i++) {
         while (!(LPUART1->ISR & USART_ISR_TXE_TXFNF)) { }    /* veri kaydı boşalsın */
         LPUART1->TDR = buf[i];

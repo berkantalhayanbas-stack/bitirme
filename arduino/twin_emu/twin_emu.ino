@@ -19,15 +19,30 @@
  *   1 PEDL  pedal = çekiş kuvveti (0..1200 N), A2 basılıyken fren (rejeneratif en çok 30 A,
  *           kalanı mekanik fren). Moda girince pedal bir kez bırakılmalı (< %5).
  *   2 SARJ  araç durur, 0,7C (40,7 A) şarj talebi; ECU şarj izni sınırlar (CV bölgesi ECU'da)
- *   3 BEKL  araç durur, yalnız yardımcı yük (250 W)
+ *   3 BEKL  araç durur ve park eder: 0 A (yardımcı yük de kapalı; dengeleme bu modda ve şarjda çalışır)
  * Her durumda paket akımı = kırp(talep, -I_allow_chg, +I_allow_dis); 0x201 zaman aşımında 0 A.
  *
+ * Hücre grupları (HIL adım 8): ikiz 19 grubu ayrı simüle eder (twin_model.c tablosu: saçılma, zayıf
+ *   grup 7, başlangıç SOC farkı). Her 100 ms 0x110-0x114 ile 19 grup gerilimi (AFE gürültüsü sigma
+ *   1 mV) ve dengeleme anahtarı geri bildirimi gider; 0x102'deki V_min/V_max gerçek en düşük / en
+ *   yüksek gruptur. ECU'nun 0x210 maskesi taze ise (< 250 ms) grupların 10 ohm direnci açılır
+ *   (I = V / 10 ohm ~ 0,41 A). Gerçek hızda %1 SOC farkı ~1,4 saatte kapanır; gösterim için
+ *   "b <k>" direncin SOC etkisini k katına çıkarır (zaman hızlandırma; gerilim düşümü gerçek akımla
+ *   kalır). HIZLANDIRILMIŞ olduğu raporda ve LCD'de görünür.
+ * Zamanlama (100 ms döngü, adım ~18 ms): adım + 0x101/0x102 -> ECU cevabı (~1 ms) -> 10 ms'den
+ *   itibaren 5 ms arayla 5 hücre çerçevesi; sonra 35-55 ms penceresinde TEK iş: rapor (~17 ms) ya
+ *   da bir LCD satırı (~30 ms). Böylece MCP2515'in 2 alım tamponu ECU'nun 3 çerçevesi gelirken
+ *   boşaltılır, hücre çerçeveleri hiçbir turda atlanmaz ve adım zamanında başlar.
+ *
  * Seri (115200, satır sonu Newline):
- *   c <cmd> <value>  0x301 komutu (mcp2515_node ile aynı; 0x10-0x1F EMU hataları burada da uygulanır)
- *   m <0..3>         sürüş modu       s <yüzde>  ikiz SOC'yi ayarla (ör. s 80)
+ *   c <cmd> <value>  0x301 komutu (mcp2515_node ile aynı; 0x10-0x1F EMU hataları burada da uygulanır,
+ *                    hücre çerçevelerine de)
+ *   m <0..3>         sürüş modu       s <yüzde>  ikiz SOC'yi ayarla (ör. s 80; grup farkları korunur)
  *   a <°C>           ortam sıcaklığını zorla (a 99 = kapat, LM35 / 25 °C'ye dön)
+ *   b <k>            dengeleme akımı çarpanı (1 = gerçek 0,41 A; 1..2000)
  * Her 1 s bir rapor satırı (tools/twin_emu_run.py bunu özetler):
- *   R,t_s,mode,v_kmh,I,V,soc%,Tc,Ts,Ta,ta_src,ecu_state,Idis,Ichg,cause,soc_ecu%,tc_ecu,ok201,ok202,err,TEC,REC,faults
+ *   R,t_s,mode,v_kmh,I,V,soc%,Tc,Ts,Ta,ta_src,ecu_state,Idis,Ichg,cause,soc_ecu%,tc_ecu,ok201,ok202,err,
+ *     TEC,REC,bal_mask,bal_flags,dv_ecu_mV,dv_mV,dsoc%,bal_k,ok210,step_us,faults
  *
  * bms_can.c / bms_can.h = bms/common/bms_can.*'nin birebir kopyası; o değişirse bunlar da güncellenmeli.
  * twin_model.c parametreleri bms_config.h / bms_param_struct.m / battery_model.py ile aynı olmalı.
@@ -91,10 +106,18 @@ float grand() { return (urand() + urand() + urand() + urand() - 2.0f) * 1.732050
 uint8_t  cnt_tx = 0, cnt_cmd = 0, cmd_have = 0, cmd_last = 0;
 uint32_t t_tx = 0, t_rep = 0, t_lcd = 0;
 uint32_t n_tx_err = 0;
-can_monitor_t mon_status, mon_ctrl;
+can_monitor_t mon_status, mon_ctrl, mon_bal;
 can_status_t  last_status;
 can_ctrl_t    last_ctrl;
-uint8_t       have_status = 0, have_ctrl = 0;
+can_bal_t     last_bal;
+uint8_t       have_status = 0, have_ctrl = 0, have_bal = 0;
+
+/* ---------------------------------------------------------------- dengeleme / zamanlama */
+const float   R_BLEED = 10.0f;             /* ohm, grup başına (arac_bms_analizi.md: 10 ohm 2 W) */
+uint16_t bal_k = 1;                        /* gösterim çarpanı */
+uint32_t bal_applied = 0;                  /* gerçekten açık olan dirençler */
+uint32_t t_step = 0, step_us = 0;
+uint8_t  cell_k = 5, cell_cnt = 0;         /* sıradaki hücre çerçevesi (5 = bitti), o turun sayacı */
 
 /* ---------------------------------------------------------------- sensörler */
 float    t_amb = 25.0f, t_force = 99.0f;   /* t_force < 90 -> zorla */
@@ -142,6 +165,7 @@ void sendMeasurements(uint32_t now)
   const bool bad_crc = faultActive(F_CRC, now);
   uint8_t d[8];
 
+  cell_cnt = c;                         /* bu turun hücre çerçeveleri aynı sayacı taşır */
   cnt_tx = (cnt_tx + 1) & 0x0F;
   if (faultActive(F_SILENT, now)) return;
   can_encode_meas1(&m1, c, d);
@@ -150,6 +174,26 @@ void sendMeasurements(uint32_t now)
   can_encode_meas2(&m2, c, d);
   if (bad_crc) d[7] ^= 0xFF;
   n_tx_err += !sendRaw(CAN_ID_EMU_MEAS2, d);
+}
+
+/* hücre çerçevesi k (0x110 + k): gruplar 4k+1..4k+4, AFE gürültüsü sigma 1 mV */
+void sendCell(uint8_t k, uint32_t now)
+{
+  can_cell_t m;
+  m.valid = 0;  m.bal = 0;
+  for (uint8_t j = 0; j < CAN_CELLS_PER_FRAME; j++) {
+    const uint8_t g = 4 * k + j;
+    m.v[j] = 0.0f;
+    if (g >= TW_NG) continue;
+    m.v[j] = tw.g[g].v + 0.001f * grand();
+    m.valid |= 1 << j;
+    if (bal_applied >> g & 1) m.bal |= 1 << j;
+  }
+  if (faultActive(F_SILENT, now)) return;
+  uint8_t d[8];
+  can_encode_cell(k, &m, cell_cnt, d);
+  if (faultActive(F_CRC, now)) d[7] ^= 0xFF;
+  n_tx_err += !sendRaw(CAN_ID_EMU_CELL0 + k, d);
 }
 
 void receiveAll(uint32_t now)
@@ -167,6 +211,10 @@ void receiveAll(uint32_t now)
       can_ctrl_t ct;
       const int ok = can_decode_ctrl(f.data, &ct, &c);
       if (can_monitor_rx(&mon_ctrl, now, ok, c)) { last_ctrl = ct; have_ctrl = 1; }
+    } else if (id == CAN_ID_ECU_BAL) {
+      can_bal_t b;
+      const int ok = can_decode_bal(f.data, &b, &c);
+      if (can_monitor_rx(&mon_bal, now, ok, c)) { last_bal = b; have_bal = 1; }
     } else if (id == CAN_ID_PC_CMD) {
       can_cmd_t q;
       if (can_decode_cmd(f.data, &q, &c) && !(cmd_have && c == cmd_last)) {
@@ -220,7 +268,7 @@ void readInputs(uint8_t tick)
   const uint8_t edge = b & ~btn_prev;
   btn_prev = b;
   if (edge & 1) { mode = (mode + 1) % N_MODE; pedal_armed = 0; }
-  if (edge & 2) { page = (page + 1) % 3; t_lcd = 0; }
+  if (edge & 2) { page = (page + 1) % 4; t_lcd = 0; }
 }
 
 /* ---------------------------------------------------------------- sürüş çevrimi: v_ref, a_ref */
@@ -273,6 +321,7 @@ void vehicleStep()
 
   /* talep edilen akım */
   if (mode == M_CHG && veh_v == 0.0f) i_req = -I_CHG_REQ + P_AUX / V;
+  else if (mode == M_IDLE && veh_v == 0.0f) i_req = 0.0f;          /* park: yardımcı yük de kapalı */
   else {
     const float pw = F_dem * ve;
     const float pe = pw >= 0.0f ? pw / ETA_D : pw * ETA_R;
@@ -304,15 +353,21 @@ void vehicleStep()
 void step(uint32_t now)
 {
   static uint8_t tick = 0, first = 1;
+  const uint32_t t0 = micros();
   readInputs(tick);
   if (++tick >= 10) tick = 0;
   vehicleStep();
   tw.t_amb = t_amb;
   if (first) { tw.tc = tw.ts = t_amb; first = 0; }   /* paket ortam sıcaklığında başlar */
-  twin_step(&tw, I_act);
+  /* dengeleme: ECU'nun 0x210'u taze değilse dirençler kapalı */
+  bal_applied = (have_bal && !mon_bal.fault) ? last_bal.mask & 0x7FFFFUL : 0;
+  twin_step(&tw, I_act, bal_applied, tw.v_max / R_BLEED, bal_k);
+  const uint32_t us = micros() - t0;
+  if (us > step_us) step_us = us;
   sendMeasurements(now);
   can_monitor_tick(&mon_status, now);
   can_monitor_tick(&mon_ctrl, now);
+  can_monitor_tick(&mon_bal, now);
 }
 
 /* ---------------------------------------------------------------- seri komutlar */
@@ -329,7 +384,7 @@ void serialCommands(uint32_t now)
     while (*p == ' ') p++;
     const char k = *p++ | 0x20;
     const long a = strtol(p, &e, 0);
-    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC>")); continue; }
+    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC> | b <k>")); continue; }
     if (k == 'c') {
       p = e;
       const long val = strtol(p, &e, 0);
@@ -338,6 +393,7 @@ void serialCommands(uint32_t now)
     } else if (k == 'm' && a >= 0 && a < N_MODE) { mode = a; pedal_armed = 0; Serial.print(F("mode ")); Serial.println(MODE_NAME[mode]); }
     else if (k == 's' && a >= 0 && a <= 100) { twin_set_soc(&tw, a * 0.01f); Serial.println(F("twin SOC set")); }
     else if (k == 'a') { t_force = a; Serial.println(F("T_amb override")); }
+    else if (k == 'b' && a >= 1 && a <= 2000) { bal_k = a; Serial.println(F("bleed factor set")); }
     else Serial.println(F("bad command"));
   }
 }
@@ -360,6 +416,12 @@ void report(uint32_t now)
   pi(mon_ctrl.n_crc_err + mon_ctrl.n_cnt_err + mon_status.n_crc_err + mon_status.n_cnt_err + n_tx_err
      + (mon_ctrl.fault ? 1000 : 0));
   pi(mcp2515.errorCountTX());  pi(mcp2515.errorCountRX());
+  Serial.print(F(",0x"));  Serial.print(bal_applied, HEX);
+  pi(have_bal ? last_bal.flags : 255);
+  pf(last_bal.dv * 1000.0f, 1);  pf((tw.v_max - tw.v_min) * 1000.0f, 1);
+  pf((tw.soc_max - tw.soc_min) * 100.0f, 3);
+  pi(bal_k);  pi(mon_bal.n_ok);  pi(step_us);
+  step_us = 0;
   Serial.print(',');
   for (uint8_t f = 0; f < N_FAULT; f++) if (faultActive(f, now)) { Serial.print(FAULT_NAME[f]); Serial.print(' '); }
   Serial.println();
@@ -370,26 +432,32 @@ const char STATE_NAME[5][5] = { "----", "NORM", "DERT", "LIMP", "SAFE" };
 
 void lcdNum(float x, int8_t w, uint8_t d) { char b[10]; dtostrf(x, w, d, b); lcd->print(b); }
 
-void lcdUpdate()
+/* Tek satır yazar (~30 ms; I2C 100 kHz'de karakter başına ~6 aktarım): tam ekran 100 ms'lik
+ * döngüyü taşırıp hücre çerçevelerini kaçırtıyordu. Satırlar sırayla, her biri 1 Hz. */
+void lcdUpdate(uint8_t row)
 {
   const uint8_t st = have_ctrl && !mon_ctrl.fault ? (last_ctrl.state <= 4 ? last_ctrl.state : 0) : 0;
-  lcd->setCursor(0, 0);
+  lcd->setCursor(0, row);
   if (page == 0) {               /* PROF NORM  42kmh / I+ 23.4 SOC 78.2 */
-    lcd->print(MODE_NAME[mode]); lcd->print(' '); lcd->print(STATE_NAME[st]); lcd->print(' ');
-    lcdNum(veh_v * 3.6f, 4, 0); lcd->print(F("kmh"));
-    lcd->setCursor(0, 1);
-    lcd->print('I'); lcdNum(I_act, 6, 1); lcd->print(F(" S")); lcdNum(tw.soc_avg * 100.0f, 5, 1); lcd->print(F("% "));
+    if (!row) { lcd->print(MODE_NAME[mode]); lcd->print(' '); lcd->print(STATE_NAME[st]); lcd->print(' ');
+                lcdNum(veh_v * 3.6f, 4, 0); lcd->print(F("kmh")); }
+    else      { lcd->print('I'); lcdNum(I_act, 6, 1); lcd->print(F(" S")); lcdNum(tw.soc_avg * 100.0f, 5, 1); lcd->print(F("% ")); }
   } else if (page == 1) {        /* ECU: izin ve kestirim */
-    lcd->print(F("Id")); lcdNum(last_ctrl.I_allow_dis, 4, 0); lcd->print(F(" Ic")); lcdNum(last_ctrl.I_allow_chg, 3, 0);
-    lcd->print(' '); lcd->print(STATE_NAME[st]); lcd->print(' ');
-    lcd->setCursor(0, 1);
-    lcd->print(F("S^")); lcdNum(last_status.soc_pct, 5, 1); lcd->print(F(" Tc^")); lcdNum(last_status.tc_hat, 5, 1); lcd->print(' ');
+    if (!row) { lcd->print(F("Id")); lcdNum(last_ctrl.I_allow_dis, 4, 0); lcd->print(F(" Ic")); lcdNum(last_ctrl.I_allow_chg, 3, 0);
+                lcd->print(' '); lcd->print(STATE_NAME[st]); lcd->print(' '); }
+    else      { lcd->print(F("S^")); lcdNum(last_status.soc_pct, 5, 1); lcd->print(F(" Tc^")); lcdNum(last_status.tc_hat, 5, 1); lcd->print(' '); }
+  } else if (page == 3) {        /* dengeleme: gerçek gerilim farkı, açık direnç sayısı / SOC farkı, çarpan */
+    if (!row) { uint8_t n = 0;
+                for (uint8_t j = 0; j < TW_NG; j++) n += bal_applied >> j & 1;
+                lcd->print(F("dV")); lcdNum((tw.v_max - tw.v_min) * 1000.0f, 5, 1); lcd->print(F("mV B")); lcdNum(n, 2, 0);
+                lcd->print(F("  ")); }
+    else      { lcd->print(F("dS")); lcdNum((tw.soc_max - tw.soc_min) * 100.0f, 5, 2); lcd->print(F("% x")); lcdNum(bal_k, 4, 0);
+                lcd->print(F("  ")); }
   } else {                       /* sıcaklıklar ve kaynak */
-    lcd->print(F("Tc")); lcdNum(tw.tc, 5, 1); lcd->print(F(" Ts")); lcdNum(tw.ts, 5, 1); lcd->print(F("  "));
-    lcd->setCursor(0, 1);
-    lcd->print(F("Ta")); lcdNum(t_amb, 5, 1); lcd->print(' ');
-    lcd->print(t_force < 90.0f ? F("SET ") : (lm35_ok ? F("LM35") : F("FIX ")));
-    lcd->print(F(" T")); lcdNum(mcp2515.errorCountTX(), 3, 0);
+    if (!row) { lcd->print(F("Tc")); lcdNum(tw.tc, 5, 1); lcd->print(F(" Ts")); lcdNum(tw.ts, 5, 1); lcd->print(F("  ")); }
+    else      { lcd->print(F("Ta")); lcdNum(t_amb, 5, 1); lcd->print(' ');
+                lcd->print(t_force < 90.0f ? F("SET ") : (lm35_ok ? F("LM35") : F("FIX ")));
+                lcd->print(F(" T")); lcdNum(mcp2515.errorCountTX(), 3, 0); }
   }
 }
 
@@ -433,19 +501,28 @@ void setup()
   twin_init(&tw, 0.80f, 25.0f, DT);
   can_monitor_init(&mon_status, millis());
   can_monitor_init(&mon_ctrl, millis());
+  can_monitor_init(&mon_bal, millis());
   t_tx = t_rep = t_lcd = millis();
 }
 
 void loop()
 {
-  const uint32_t now = millis();
+  uint32_t now = millis();
   if (digitalRead(PIN_INT) == LOW) receiveAll(now);
   serialCommands(now);
   if ((int32_t)(now - t_tx) >= 0) {
     t_tx += TX_PERIOD;
     receiveAll(now);
     step(now);
+    t_step = now = millis();
+    cell_k = 0;
   }
-  if ((int32_t)(now - t_rep) >= 0) { t_rep += 1000; report(now); }
-  if (lcd && (int32_t)(now - t_lcd) >= 0) { t_lcd = now + 500; lcdUpdate(); }
+  /* döngü içi pencereler (dosya başındaki "Zamanlama") */
+  const uint32_t ph = now - t_step;
+  if (cell_k < CAN_N_CELL_FRAMES && ph >= 10u + 5u * cell_k) sendCell(cell_k++, now);
+  if (cell_k >= CAN_N_CELL_FRAMES && ph >= 35u && ph < 55u) {     /* hücreler gittikten sonra, tek iş */
+    static uint8_t row = 0;
+    if ((int32_t)(now - t_rep) >= 0) { t_rep += 1000; report(now); }
+    else if (lcd && (int32_t)(now - t_lcd) >= 0) { t_lcd = now + 500; lcdUpdate(row); row ^= 1; }
+  }
 }

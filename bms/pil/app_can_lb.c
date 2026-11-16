@@ -4,14 +4,15 @@
  *          -> alım izleyicisi.  Sonuç LPUART1'e (ST-LINK sanal COM, 115200 8N1) metin olarak yazılır.
  *
  * Testler
- *   T1  5 mesaj tipi x N_ROUNDS tur: kimlik, uzunluk, ham baytlar birebir; çözülen değerler
- *       ölçek çözünürlüğünün yarısı içinde; izleyici her çerçeveyi kabul eder.
+ *   T1  7 mesaj tipi x N_ROUNDS tur: kimlik, uzunluk, ham baytlar birebir; çözülen değerler
+ *       ölçek çözünürlüğünün yarısı içinde; izleyici ilk 5 tipin her çerçevesini kabul eder.
+ *       Hücre gerilimi (0x110-0x114, 12 bit paketleme, boş yuva) ve dengeleme (0x210) de çözülür.
  *   T2  E2E hata enjeksiyonu (CAN üzerinden): bozuk CRC, yanlış kimlik (data ID), donmuş sayaç,
  *       atlanmış sayaç -> izleyici sayaçları beklenen değerde.
  *   T3  Zaman aşımı (sanal zaman): 250 ms -> fault, 500 ms -> safe (kalıcı). Açılış: ilk
  *       mesajdan önce CAN_TIMEOUT_FIRST_MS (2 s) boyunca SAFE yok; hiç mesaj gelmezse 2 s'de SAFE.
  *   T4  FDCAN hata sayaçları sıfır, error passive / bus-off yok.
- *   T5  Normal moddaki kabul filtresi: yalnızca 0x101, 0x102, 0x301 alınır.
+ *   T5  Normal moddaki kabul filtresi: yalnızca 0x101, 0x102, 0x301 ve 0x110-0x114 alınır.
  * LED (PA5): PASS -> yavaş (500 ms), FAIL -> hızlı (100 ms) yanıp söner.
  */
 #include <math.h>
@@ -130,6 +131,25 @@ static void t1_roundtrip(void)
             check_rx(can_decode_cmd(rx, &f2, &cnt) && cnt == c,
                      f2.cmd == f.cmd && f2.value == f.value,
                      CMD, CAN_ID_PC_CMD, k, cnt);
+
+        /* hücre çerçevesi (sırası k % 5) ve dengeleme komutu: 4 x 12 bit paketleme, boş yuva */
+        const uint8_t fk = (uint8_t)(k % CAN_N_CELL_FRAMES);
+        const uint16_t cid = (uint16_t)(CAN_ID_EMU_CELL0 + fk);
+        can_cell_t g = { { 1.0f + 4.094f * s, 4.2f - 1.7f * s, 2.5f + 0.001f * (float)(k % 7u), 3.6f + 0.5f * s },
+                         (uint8_t)(fk == 4u ? 0x7u : 0xFu), (uint8_t)(k & 0xFu) }, g2;
+        can_encode_cell(fk, &g, c, tx);
+        if (xfer(cid, tx, rx, k)) {
+            int okv = can_decode_cell(fk, rx, &g2, &cnt) && cnt == c && g2.valid == g.valid && g2.bal == g.bal;
+            for (int j = 0; j < (int)CAN_CELLS_PER_FRAME; j++)
+                if (g.valid >> j & 1u) okv = okv && near(g2.v[j], g.v[j], 0.001f);
+            if (!okv) fail("cell value", cid, k);
+        }
+        can_bal_t h = { (k * 2654435761u) & 0x7FFFFu, (uint8_t)(k & 0x0Fu), 0.05f * s }, h2;
+        can_encode_bal(&h, c, tx);
+        if (xfer(CAN_ID_ECU_BAL, tx, rx, k))
+            if (!(can_decode_bal(rx, &h2, &cnt) && cnt == c && h2.mask == h.mask && h2.flags == h.flags
+                  && near(h2.dv, h.dv, 0.0001f)))
+                fail("bal value", CAN_ID_ECU_BAL, k);
     }
     for (int m = 0; m < N_MSG; m++)
         if (mon[m].n_ok != N_ROUNDS || mon[m].n_lost || mon[m].n_cnt_err || mon[m].n_crc_err)
@@ -225,8 +245,10 @@ static void t3_timeout(void)
  * çerçeveler de alım filtresinden geçer. Her kimlik tek tek gönderilir, 1 ms beklenir. */
 static void t5_filter(void)
 {
-    static const uint16_t ids[] = { 0x100, 0x101, 0x102, 0x103, 0x201, 0x202, 0x300, 0x301, 0x7FF };
-    static const uint8_t  acc[] = { 0,     1,     1,     0,     0,     0,     0,     1,     0     };
+    static const uint16_t ids[] = { 0x100, 0x101, 0x102, 0x103, 0x10F, 0x110, 0x112, 0x114, 0x115,
+                                    0x201, 0x202, 0x210, 0x300, 0x301, 0x7FF };
+    static const uint8_t  acc[] = { 0,     1,     1,     0,     0,     1,     1,     1,     0,
+                                    0,     0,     0,     0,     1,     0     };
     uint8_t tx[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }, rx[8], len;
     uint16_t rid;
 
@@ -261,7 +283,7 @@ void can_lb_run(void)
 
     uint32_t f0 = n_fail;
     t1_roundtrip();
-    report("T1 roundtrip 5 msg x 1000", f0);
+    report("T1 roundtrip 7 msg x 1000", f0);
     put_s("   frames "); put_u(lat_n);
     put_s(", latency mean "); put_u(lat_n ? (lat_sum / lat_n) / (BSP_CPU_HZ / 1000000u) : 0);
     put_s(" us, max "); put_u(lat_max / (BSP_CPU_HZ / 1000000u)); put_s(" us\r\n");
@@ -278,7 +300,7 @@ void can_lb_run(void)
     put_s(" EP "); put_u(e.ep); put_s(" BO "); put_u(e.bo); put_s(" CEL "); put_u(e.cel);
     put_s(" rx_lost "); put_u(e.n_rx_lost); put_s("\r\n");
 
-    f0 = n_fail;  t5_filter();           report("T5 acceptance filter 0x101/0x102/0x301", f0);
+    f0 = n_fail;  t5_filter();           report("T5 acceptance filter 0x101/0x102/0x301/0x110-0x114", f0);
 
     put_s(n_fail ? "CAN LOOPBACK: FAIL (" : "CAN LOOPBACK: PASS (");
     put_u(n_fail); put_s(" errors)\r\n");
