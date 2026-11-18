@@ -25,15 +25,15 @@
 #define CELL_RC     1.8f
 #define CELL_RU     9.0f
 
-/* ---------------- OCV(SOC): Chen vd. (2020), LG M50 */
+/* ---------------- OCV(SOC): Kirkaldy vd. (2024) LG M50T GITT dinlenme gerilimleri (bitirme veri/ocv_gitt.py) */
 #define OCV_N 23
 static const float SOC_TAB[OCV_N] PROGMEM = {
     0.0f, 0.02f, 0.05f, 0.1f, 0.15f, 0.2f, 0.25f, 0.3f, 0.35f, 0.4f, 0.45f, 0.5f,
     0.55f, 0.6f, 0.65f, 0.7f, 0.75f, 0.8f, 0.85f, 0.9f, 0.95f, 0.98f, 1.0f };
 static const float OCV_TAB[OCV_N] PROGMEM = {
-    2.4977f, 2.8373f, 3.0726f, 3.2574f, 3.3956f, 3.4487f, 3.4934f, 3.5473f, 3.5959f, 3.6329f,
-    3.6664f, 3.7051f, 3.7538f, 3.8055f, 3.859f, 3.9203f, 3.9671f, 4.0165f, 4.0658f, 4.0927f,
-    4.111f, 4.1458f, 4.1809f };
+    2.9414f, 3.0161f, 3.1444f, 3.2871f, 3.4047f, 3.4646f, 3.5055f, 3.5621f, 3.6086f, 3.6418f,
+    3.6729f, 3.7119f, 3.7594f, 3.8136f, 3.8737f, 3.9207f, 3.9641f, 4.0162f, 4.0619f, 4.0873f,
+    4.112f, 4.1519f, 4.1845f };
 
 /* ---------------- grup sapmaları: kapasite [0,1 %], direnç [%], başlangıç SOC [0,1 % SOC]
  * Grup 7 (indeks 6) zayıf: -%5 kapasite, +%15 direnç. Diğerleri üretim saçılması (+-%0,5 / +-%3);

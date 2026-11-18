@@ -23,11 +23,12 @@
 #define CELL_RC         1.8f        /* [K/W] */
 #define CELL_RU         9.0f
 
-/* OCV polinomu (hücre, 7. derece, en yüksek dereceden başlayarak) */
+/* OCV polinomu (hücre, 7. derece, en yüksek dereceden başlayarak; SOC >= 0,05'te Kirkaldy vd. 2024
+ * LG M50T GITT OCV tablosuna uydurma, en büyük hata 11,6 mV; bms_param_struct.m ile aynı) */
 #define OCV_POLY_N      8
 static const float OCV_POLY[OCV_POLY_N] = {
-    103.853146128f, -379.901612457f, 567.288148072f, -450.895141102f,
-    208.968987223f, -57.5219165548f, 9.68100441089f, 2.70638848517f };
+    60.3790948991f, -208.990896881f, 295.06003585f, -224.987541467f,
+    104.426799217f, -30.805913718f, 6.20417948038f, 2.89779228523f };
 
 /* ---- SOC EKF, x = [SOC V1 V2 b_I] ---- */
 #define EKF_P0          { 0.1f, 0.01f, 0.01f, 1.0f }
