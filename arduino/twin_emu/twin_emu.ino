@@ -469,7 +469,9 @@ void report(uint32_t now)
 }
 
 /* ---------------------------------------------------------------- LCD (2 Hz) */
-const char STATE_NAME[5][5] = { "----", "NORM", "DERT", "LIMP", "SAFE" };
+/* 5 = CAN!: 0x201 zaman aşımında (> CAN_TIMEOUT_FAULT_MS; kablo kopuk ya da ECU yeniden başlıyor).
+ * ECU'nun durumu bilinemez; ECU bu sırada kendi tarafında SAFE'e geçer (far söner, röle bırakır). */
+const char STATE_NAME[6][5] = { "----", "NORM", "DERT", "LIMP", "SAFE", "CAN!" };
 
 void lcdNum(float x, int8_t w, uint8_t d) { char b[10]; dtostrf(x, w, d, b); lcd->print(b); }
 
@@ -477,7 +479,7 @@ void lcdNum(float x, int8_t w, uint8_t d) { char b[10]; dtostrf(x, w, d, b); lcd
  * döngüyü taşırıp hücre çerçevelerini kaçırtıyordu. Satırlar sırayla, her biri 1 Hz. */
 void lcdUpdate(uint8_t row)
 {
-  const uint8_t st = have_ctrl && !mon_ctrl.fault ? (last_ctrl.state <= 4 ? last_ctrl.state : 0) : 0;
+  const uint8_t st = mon_ctrl.fault ? 5 : (have_ctrl ? (last_ctrl.state <= 4 ? last_ctrl.state : 0) : 0);
   lcd->setCursor(0, row);
   if (page == 0) {               /* PROF NORM  42kmh / I+ 23.4 SOC 78.2 */
     if (!row) { lcd->print(MODE_NAME[mode]); lcd->print(' '); lcd->print(STATE_NAME[st]); lcd->print(' ');
