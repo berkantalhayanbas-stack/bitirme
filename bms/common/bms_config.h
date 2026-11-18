@@ -58,7 +58,9 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_T_DER_OFF   43.0f
 #define DEC_T_DER_FULL  55.0f
 #define DEC_PSI_COOL    0.3f
-#define DEC_RU_ALARM    18.0f
+#define DEC_RU_ALARM    18.0f       /* [K/W] soğutma alarmı açılır (2 x nominal R_u) */
+#define DEC_RU_ALARM_OFF 15.0f      /* [K/W] altına inince kalkar (histerezis; kestirim eşik
+                                       çevresinde yakınsarken alarm açılıp kapanıyordu) */
 #define DEC_V_LIM_DIS   2.90f
 #define DEC_V_LIM_CHG   4.18f
 #define DEC_K_SOP       0.3f
