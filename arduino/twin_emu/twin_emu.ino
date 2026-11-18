@@ -52,6 +52,9 @@
  *   a <°C>           ortam sıcaklığını zorla (a 99 = kapat, LM35 / 25 °C'ye dön)
  *   b <k>            dengeleme akımı çarpanı (1 = gerçek 0,41 A; 1..2000)
  *   f <0|1>          soğutma arızası (D4 ile aynı)      h <0|1>  sıcak gün (+15 °C ortam)
+ *   p <0..100>       pedal yüzdesi (pot yerine; PEDL moduna geçer; p -1 = pota dön)
+ *   t <°C>           paket sıcaklığını hedefe getir (çekirdek = yüzey), örnek başına en çok 0,5 °C:
+ *                    ani sıçrama ECU'nun sıcaklık hızı teşhisine (2 °C/örnek) takılıp LIMP verirdi
  * Her 1 s bir rapor satırı (tools/twin_emu_run.py bunu özetler):
  *   R,t_s,mode,v_kmh,I,V,soc%,Tc,Ts,Ta,ta_src,ecu_state,Idis,Ichg,cause,soc_ecu%,tc_ecu,ok201,ok202,err,
  *     TEC,REC,bal_mask,bal_flags,dv_ecu_mV,dv_mV,dsoc%,bal_k,ok210,step_us,faults
@@ -103,6 +106,8 @@ float    veh_v = 0.0f;                     /* araç hızı [m/s] */
 float    I_dem = 0.0f, I_act = 0.0f;
 float    pedal = 0.0f;
 uint8_t  have_pedal = 0, pedal_armed = 0, brake = 0;
+int8_t   pedal_force = -1;                 /* seri "p": 0..100 %, -1 = pot */
+float    t_pack_goal = 99.0f;              /* seri "t": paket sıcaklığı hedefi (99 = yok) */
 
 /* sentetik çevrim: (hedef km/h, hızlanma s, sabit s, yavaşlama s, bekleme s) */
 const uint8_t CYCLE[8][5] PROGMEM = {
@@ -290,7 +295,8 @@ void readInputs(uint8_t tick, uint32_t now)
   } else if (!lm35_seen) { t_amb = 25.0f + hot; lm35_init = 0; }
   /* koptuysa ortam son değerde kalır */
 
-  if (have_pedal) {
+  if (pedal_force >= 0) pedal = pedal_force * 0.01f;
+  else if (have_pedal) {
     const float p = (analogRead(PIN_PEDAL) - 30) * (1.0f / 960.0f);
     pedal = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
   }
@@ -395,6 +401,12 @@ void step(uint32_t now)
   vehicleStep();
   tw.t_amb = t_amb;
   if (first) { tw.tc = tw.ts = t_amb; first = 0; }   /* paket ortam sıcaklığında başlar */
+  if (t_pack_goal < 90.0f) {                          /* "t": hedefe rampa (0,5 °C / örnek) */
+    const float e = t_pack_goal - tw.ts;
+    const float d = e > 0.5f ? 0.5f : (e < -0.5f ? -0.5f : e);
+    tw.ts += d;  tw.tc = tw.ts;
+    if (d == e) t_pack_goal = 99.0f;
+  }
   /* dengeleme: ECU'nun 0x210'u taze değilse dirençler kapalı */
   bal_applied = (have_bal && !mon_bal.fault) ? last_bal.mask & 0x7FFFFUL : 0;
   twin_step(&tw, I_act, bal_applied, tw.v_max / R_BLEED, bal_k);
@@ -431,6 +443,12 @@ void serialCommands(uint32_t now)
     else if (k == 'a') { t_force = a; Serial.println(F("T_amb override")); }
     else if (k == 'b' && a >= 1 && a <= 2000) { bal_k = a; Serial.println(F("bleed factor set")); }
     else if (k == 'f') setCoolFault(a != 0);
+    else if (k == 'p' && a >= -1 && a <= 100) {
+      pedal_force = a;
+      if (a >= 0) { mode = M_PEDAL; pedal_armed = 1; }
+      Serial.println(F("pedal set"));
+    }
+    else if (k == 't' && a > -20 && a < 70) { t_pack_goal = a; Serial.println(F("pack T ramp")); }
     else if (k == 'h') { hot_day = a != 0; Serial.println(hot_day ? F("hot day ON (+15 C)") : F("hot day OFF")); }
     else Serial.println(F("bad command"));
   }

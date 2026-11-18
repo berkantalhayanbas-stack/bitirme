@@ -1,0 +1,54 @@
+# Demo senaryosu: bataryayı strese sokan durumlar -> ECU fark eder -> önlem alır.
+# python tools/demo_run.py tools/demo/stres.txt   (biçim: tools/demo_run.py başı)
+# Butona ya da kabloya dokunmak gerekmez; hepsi emülatör seri komutlarıyla.
+
+=== 1 Normal surus
++2 p 40          ; Surucu gaza basiyor (%40). Paket saglikli: ECU tam izin veriyor, far tam parlak
+bekle state==1 30 ; ECU NORMAL
++15 -            ; Akim artti ama izin degismedi: far, BMS'in verdigi gucu gosteriyor
+
+=== 2 Sogutma arizasi
++0 p 70          ; Yuk artiyor (%70)
++0 f 1           ; Sogutma bozuldu (R_u x4). ECU'ya HABER VERILMEDI
+bekle cause&2 400 ; ECU sogutma arizasini kendi kestiriminden buldu, izin %70'e indi (far kisildi)
+# (aciliştan sonraki ilk 120 s sogutma alarmi yok: gozlemci yakinsamasi, DEC_N_COOL_BLANK)
++15 -            ; Onlem: paket isinmadan once akim kisildi (onleyici derating)
++0 f 0           ; (sogutma onarildi)
++0 p 0           ; (arac duruyor)
+
+=== 3 Sicak paket + agir yuk
++0 a 38          ; Sicak gun: ortam 38 C
++0 t 48          ; Arac gunese park etmis: paket 48 C (ikiz ~4 s'de rampayla)
++5 !reset        ; Kontak acildi (ECU yeniden basliyor)
+bekle state>=2 20 ; ECU paketin sicak oldugunu gordu: sicaklik derating, sarj kapali
++0 p 90          ; Surucu sert hizlaniyor (%90)
++30 -            ; Talep yuksek ama ECU izni sicakliga gore sinirli; paket isindikca izin daha da duser
+
+=== 4 Sicaklik sensoru koptu
++0 p 40          ; (normal yuk)
++0 c 20 0        ; NTC kablosu koptu (sensor -40 C okuyor)
+bekle state==3 10 ; ECU olcumun gecersiz oldugunu anladi: LIMP-HOME, izin %25 (far en kisik)
++10 -            ; Arac servise kadar dusuk gucle gidebilir
++0 c 16 0        ; (sensor onarildi)
++0 p 0
++0 a 99          ; (ortam: LM35 / 25 C)
++0 t 30
++5 !reset        ; Servis: ECU yeniden basladi
+bekle state==1 25 ; ECU NORMAL
+
+=== 5 Yazilim kilitlendi
++3 c 4 0xA5A5    ; ECU yazilimi kilitleniyor (sonsuz dongu testi)
+bekle state==4 5 ; Watchdog ECU'yu sifirladi, ECU guvenli durumda (SAFE) acildi: kontaktor acik, far sonuk
++8 -             ; SAFE kilitli: yalniz bilincli bir yeniden baslatmayla cikilir
++0 !reset
+bekle state==1 25 ; ECU NORMAL
+
+=== 6 Iletisim koptu
++2 p 40          ; Surus
++5 c 19 0        ; Olcum hatti koptu (EMU susuyor)
+bekle state==4 3 ; ECU olcum alamayinca 0,5 s icinde SAFE: kontaktor acik, far sonuk
++8 -
++0 c 16 0        ; (hat onarildi)
++0 p 0
++1 !reset
+bekle state==1 25 ; Sistem yeniden NORMAL
