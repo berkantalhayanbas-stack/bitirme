@@ -278,7 +278,9 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     if (Tc_hat >= DEC_T_DER_ON) d->therm_on = 1;
     else if (Tc_hat < DEC_T_DER_OFF) d->therm_on = 0;
     const float psi_T = d->therm_on ? clampf((Tc_hat - DEC_T_DER_OFF) / (DEC_T_DER_FULL - DEC_T_DER_OFF), 0.f, 1.f) : 0.0f;
-    if (Ru_hat > DEC_RU_ALARM) d->cool_on = 1;
+    if (d->n_run < DEC_N_COOL_BLANK) d->n_run++;
+    if (d->n_run < DEC_N_COOL_BLANK) d->cool_on = 0;          /* gözlemci yakınsıyor */
+    else if (Ru_hat > DEC_RU_ALARM) d->cool_on = 1;
     else if (Ru_hat < DEC_RU_ALARM_OFF) d->cool_on = 0;
     const float psi_C = d->cool_on ? DEC_PSI_COOL : 0.0f;
     const float psi = maxf(psi_T, psi_C);

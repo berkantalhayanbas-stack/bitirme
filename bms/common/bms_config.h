@@ -61,6 +61,11 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_RU_ALARM    18.0f       /* [K/W] soğutma alarmı açılır (2 x nominal R_u) */
 #define DEC_RU_ALARM_OFF 15.0f      /* [K/W] altına inince kalkar (histerezis; kestirim eşik
                                        çevresinde yakınsarken alarm açılıp kapanıyordu) */
+#define DEC_N_COOL_BLANK 1200       /* 120 s: açılıştan sonra soğutma alarmı yok. Gözlemci sıcak ve
+                                       yük altındaki pakette başlarsa (Tc > Ts iken Tc = Ts varsayar)
+                                       R_u kestirimi geçici olarak 30 K/W'ı aşıyor; taramada son sahte
+                                       alarm < 60 s (twin/test_decision_unit.py U13, 2x pay). Sıcaklık
+                                       koruması bu sürede de çalışır. */
 #define DEC_V_LIM_DIS   2.90f
 #define DEC_V_LIM_CHG   4.18f
 #define DEC_K_SOP       0.3f

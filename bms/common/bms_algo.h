@@ -51,7 +51,7 @@ float rint_step(rint_t *r, float i_meas, float v_meas, float Tc_hat, float soc_e
 enum { ST_NORMAL = 1, ST_DERATE = 2, ST_LIMP = 3, ST_SAFE = 4 };
 typedef struct {
     uint8_t state, therm_on, cool_on, f_ds, f_sop_dis, f_sop_chg;
-    int   n_ok, n_lo, n_hi;
+    int   n_ok, n_lo, n_hi, n_run;   /* n_run: açılıştan beri örnek (soğutma alarmı beklemesi) */
     float i_dis, i_chg;
 } decision_t;
 typedef struct {
