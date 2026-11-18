@@ -10,6 +10,7 @@
  *                A0 pedal potu (uçlar 5 V / GND, orta uç A0)      yoksa: hazır sürüş profili
  *                A1 LM35 çıkışı (ortam sıcaklığı, 10 mV/°C)       yoksa: 25 °C
  *                D3 mod butonu, A2 fren butonu, A3 LCD sayfa butonu (GND'ye basar, dahili pull-up)
+ *                D4 soğutma arızası butonu, D5 watchdog testi butonu (demo; aynı bağlantı)
  *                16x2 I2C LCD (PCF8574, adres 0x27 ya da 0x3F) SDA A4, SCL A5   yoksa: yalnız seri
  * Algılama     : pedal açılışta (A0'da pull-up açıkken < 1000 okunursa var), LM35 her saniye
  *                (kısa pull-up darbesinden sonra makul aralıkta okunursa var), LCD açılışta I2C ACK.
@@ -29,6 +30,16 @@
  *   (I = V / 10 ohm ~ 0,41 A). Gerçek hızda %1 SOC farkı ~1,4 saatte kapanır; gösterim için
  *   "b <k>" direncin SOC etkisini k katına çıkarır (zaman hızlandırma; gerilim düşümü gerçek akımla
  *   kalır). HIZLANDIRILMIŞ olduğu raporda ve LCD'de görünür.
+ * Demo arızaları (uçtan uca kontrol; değerler twin/ senaryolarıyla aynı):
+ *   D4 basış     soğutma arızası aç/kapa: ikizde R_u x4 (twin cooling_fault). ECU'ya söylenmez;
+ *                ECU R_u kestiriminden kendisi bulur (DEC_RU_ALARM) -> soğutma alarmı, DERATE.
+ *   D4 basılı açılış  sıcak gün: ortam = LM35 + 15 °C (LM35 yoksa 40 °C; twin hot_day). Paket de
+ *                bu sıcaklıkta başlar (sıcak günde park etmiş araç).
+ *   D5 basış     ECU'ya 0x301 cmd 0x04 (CAN_CMD_UNLOCK): ECU sonsuz döngüye girer, IWDG sıfırlar,
+ *                ECU SAFE-STOP'ta açılır (yalnız BMS_SAFETY=1 ECU derlemesinde).
+ *   LM35 kopması açılışta LM35 vardıysa ve sonra kaybolursa sıcaklık sensörü kopuk sayılır:
+ *                0x101 T = -40 °C (cmd 0x14 ile aynı) -> ECU sensör teşhisi -> LIMP. Takılınca kalkar.
+ *                Ortam son değerde tutulur. Açılışta LM35 yoksa eskisi gibi 25 °C (hata yok).
  * Zamanlama (100 ms döngü, adım ~18 ms): adım + 0x101/0x102 -> ECU cevabı (~1 ms) -> 10 ms'den
  *   itibaren 5 ms arayla 5 hücre çerçevesi; sonra 35-55 ms penceresinde TEK iş: rapor (~17 ms) ya
  *   da bir LCD satırı (~30 ms). Böylece MCP2515'in 2 alım tamponu ECU'nun 3 çerçevesi gelirken
@@ -40,6 +51,7 @@
  *   m <0..3>         sürüş modu       s <yüzde>  ikiz SOC'yi ayarla (ör. s 80; grup farkları korunur)
  *   a <°C>           ortam sıcaklığını zorla (a 99 = kapat, LM35 / 25 °C'ye dön)
  *   b <k>            dengeleme akımı çarpanı (1 = gerçek 0,41 A; 1..2000)
+ *   f <0|1>          soğutma arızası (D4 ile aynı)      h <0|1>  sıcak gün (+15 °C ortam)
  * Her 1 s bir rapor satırı (tools/twin_emu_run.py bunu özetler):
  *   R,t_s,mode,v_kmh,I,V,soc%,Tc,Ts,Ta,ta_src,ecu_state,Idis,Ichg,cause,soc_ecu%,tc_ecu,ok201,ok202,err,
  *     TEC,REC,bal_mask,bal_flags,dv_ecu_mV,dv_mV,dsoc%,bal_k,ok210,step_us,faults
@@ -58,6 +70,9 @@ extern "C" {
 
 const uint8_t  PIN_CS = 10, PIN_INT = 2;
 const uint8_t  PIN_MODE = 3, PIN_BRAKE = A2, PIN_PAGE = A3, PIN_PEDAL = A0, PIN_LM35 = A1;
+const uint8_t  PIN_COOL = 4, PIN_WDG = 5;
+const float    RU_FAULT = 4.0f;            /* twin cooling_fault: R_u x4 */
+const float    T_HOT    = 15.0f;           /* sıcak gün ortam ofseti [°C] (25 + 15 = twin hot_day 40 °C) */
 const uint32_t TX_PERIOD = 100;            /* ms, = BMS_TS */
 const float    DT = 0.1f;
 
@@ -122,6 +137,8 @@ uint8_t  cell_k = 5, cell_cnt = 0;         /* sıradaki hücre çerçevesi (5 = 
 /* ---------------------------------------------------------------- sensörler */
 float    t_amb = 25.0f, t_force = 99.0f;   /* t_force < 90 -> zorla */
 uint8_t  lm35_ok = 0, lm35_init = 0;
+uint8_t  lm35_seen = 0, lm35_lost = 0;     /* açılışta vardı / sonradan koptu (-> NTC kopuk) */
+uint8_t  hot_day = 0, cool_fault = 0;
 uint8_t  page = 0, btn_prev = 0;
 
 /* ---------------------------------------------------------------- hata enjeksiyonu (0x10-0x14) */
@@ -159,7 +176,7 @@ bool sendRaw(uint16_t id, const uint8_t d[8])
 void sendMeasurements(uint32_t now)
 {
   can_meas1_t m1 = { tw.v_pack + 0.25f * grand(), I_act + 0.5f + 0.5f * grand(), tw.ts + 0.3f * grand() };
-  if (faultActive(F_NTC, now)) m1.T = -40.0f;
+  if (faultActive(F_NTC, now) || lm35_lost) m1.T = -40.0f;
   const can_meas2_t m2 = { tw.v_min + 0.005f * grand(), tw.v_max + 0.005f * grand(), t_amb };
   const uint8_t c = faultActive(F_FREEZE, now) ? cnt_frozen : cnt_tx;
   const bool bad_crc = faultActive(F_CRC, now);
@@ -239,7 +256,14 @@ void sendCommand(uint8_t cmd, int16_t value, uint32_t now)
 }
 
 /* ---------------------------------------------------------------- sensörler ve butonlar */
-void readInputs(uint8_t tick)
+void setCoolFault(uint8_t on)
+{
+  cool_fault = on;
+  tw.ru_k = on ? RU_FAULT : 1.0f;
+  Serial.println(on ? F("cooling fault ON (R_u x4)") : F("cooling fault OFF"));
+}
+
+void readInputs(uint8_t tick, uint32_t now)
 {
   /* LM35: her saniye bağlı mı diye bak (kopuk pin pull-up darbesinden sonra yüksek kalır) */
   if (tick == 0) {
@@ -251,11 +275,20 @@ void readInputs(uint8_t tick)
   for (uint8_t k = 0; k < 16; k++) s += analogRead(PIN_LM35);
   const float t = s * (500.0f / 1024.0f / 16.0f);  /* 5 V ref, 10 mV/°C */
   if (lm35_ok && (t < 2.0f || t > 60.0f)) lm35_ok = 0;
+  /* bir kez görülen LM35 kaybolursa sensör kopuk: 0x101 T = -40 °C (sendMeasurements) */
+  if (lm35_ok) lm35_seen = 1;
+  const uint8_t lost = lm35_seen && !lm35_ok;
+  if (lost != lm35_lost) {
+    lm35_lost = lost;
+    Serial.println(lost ? F("LM35 lost -> NTC open (T = -40)") : F("LM35 back"));
+  }
+  const float hot = hot_day ? T_HOT : 0.0f;
   if (t_force < 90.0f)  t_amb = t_force;
   else if (lm35_ok) {
-    if (!lm35_init) { t_amb = t; lm35_init = 1; }
-    t_amb += 0.01f * (t - t_amb);                  /* tau ~10 s */
-  } else { t_amb = 25.0f; lm35_init = 0; }
+    if (!lm35_init) { t_amb = t + hot; lm35_init = 1; }
+    t_amb += 0.01f * (t + hot - t_amb);            /* tau ~10 s */
+  } else if (!lm35_seen) { t_amb = 25.0f + hot; lm35_init = 0; }
+  /* koptuysa ortam son değerde kalır */
 
   if (have_pedal) {
     const float p = (analogRead(PIN_PEDAL) - 30) * (1.0f / 960.0f);
@@ -264,11 +297,14 @@ void readInputs(uint8_t tick)
   brake = digitalRead(PIN_BRAKE) == LOW;
 
   /* butonlar 100 ms'de bir örneklenir (sıçrama süzgeci yerine geçer); basılma kenarı */
-  const uint8_t b = (digitalRead(PIN_MODE) == LOW) | ((digitalRead(PIN_PAGE) == LOW) << 1);
+  const uint8_t b = (digitalRead(PIN_MODE) == LOW) | ((digitalRead(PIN_PAGE) == LOW) << 1)
+                  | ((digitalRead(PIN_COOL) == LOW) << 2) | ((digitalRead(PIN_WDG) == LOW) << 3);
   const uint8_t edge = b & ~btn_prev;
   btn_prev = b;
   if (edge & 1) { mode = (mode + 1) % N_MODE; pedal_armed = 0; }
   if (edge & 2) { page = (page + 1) % 4; t_lcd = 0; }
+  if (edge & 4) setCoolFault(!cool_fault);
+  if (edge & 8) sendCommand(CAN_CMD_ECU_HANG, CAN_CMD_UNLOCK, now);   /* 1 TX tamponu; 0x101/0x102 ile 3 */
 }
 
 /* ---------------------------------------------------------------- sürüş çevrimi: v_ref, a_ref */
@@ -354,7 +390,7 @@ void step(uint32_t now)
 {
   static uint8_t tick = 0, first = 1;
   const uint32_t t0 = micros();
-  readInputs(tick);
+  readInputs(tick, now);
   if (++tick >= 10) tick = 0;
   vehicleStep();
   tw.t_amb = t_amb;
@@ -394,6 +430,8 @@ void serialCommands(uint32_t now)
     else if (k == 's' && a >= 0 && a <= 100) { twin_set_soc(&tw, a * 0.01f); Serial.println(F("twin SOC set")); }
     else if (k == 'a') { t_force = a; Serial.println(F("T_amb override")); }
     else if (k == 'b' && a >= 1 && a <= 2000) { bal_k = a; Serial.println(F("bleed factor set")); }
+    else if (k == 'f') setCoolFault(a != 0);
+    else if (k == 'h') { hot_day = a != 0; Serial.println(hot_day ? F("hot day ON (+15 C)") : F("hot day OFF")); }
     else Serial.println(F("bad command"));
   }
 }
@@ -424,6 +462,9 @@ void report(uint32_t now)
   step_us = 0;
   Serial.print(',');
   for (uint8_t f = 0; f < N_FAULT; f++) if (faultActive(f, now)) { Serial.print(FAULT_NAME[f]); Serial.print(' '); }
+  if (lm35_lost)  Serial.print(F("LM35LOST "));
+  if (cool_fault) Serial.print(F("COOL "));
+  if (hot_day)    Serial.print(F("HOT "));
   Serial.println();
 }
 
@@ -453,11 +494,12 @@ void lcdUpdate(uint8_t row)
                 lcd->print(F("  ")); }
     else      { lcd->print(F("dS")); lcdNum((tw.soc_max - tw.soc_min) * 100.0f, 5, 2); lcd->print(F("% x")); lcdNum(bal_k, 4, 0);
                 lcd->print(F("  ")); }
-  } else {                       /* sıcaklıklar ve kaynak */
+  } else {                       /* sıcaklıklar, kaynak ve demo arızaları (S sıcak gün, C soğutma) */
     if (!row) { lcd->print(F("Tc")); lcdNum(tw.tc, 5, 1); lcd->print(F(" Ts")); lcdNum(tw.ts, 5, 1); lcd->print(F("  ")); }
     else      { lcd->print(F("Ta")); lcdNum(t_amb, 5, 1); lcd->print(' ');
-                lcd->print(t_force < 90.0f ? F("SET ") : (lm35_ok ? F("LM35") : F("FIX ")));
-                lcd->print(F(" T")); lcdNum(mcp2515.errorCountTX(), 3, 0); }
+                lcd->print(t_force < 90.0f ? F("SET ") : (lm35_ok ? F("LM35") : (lm35_lost ? F("KOP!") : F("FIX "))));
+                lcd->print(' '); lcd->print(hot_day ? 'S' : '-'); lcd->print(cool_fault ? 'C' : '-');
+                lcd->print(mcp2515.errorCountTX() ? '!' : ' '); }   /* ! = CAN TEC > 0 (değer raporda) */
   }
 }
 
@@ -467,6 +509,11 @@ void setup()
   Serial.begin(115200);
   pinMode(PIN_INT, INPUT_PULLUP);
   pinMode(PIN_MODE, INPUT_PULLUP);  pinMode(PIN_BRAKE, INPUT_PULLUP);  pinMode(PIN_PAGE, INPUT_PULLUP);
+  pinMode(PIN_COOL, INPUT_PULLUP);  pinMode(PIN_WDG, INPUT_PULLUP);
+  delay(2);
+  /* D4 basılıyken açılış = sıcak gün; bırakılırken soğutma arızası tetiklenmesin (kenar yok) */
+  hot_day = digitalRead(PIN_COOL) == LOW;
+  if (hot_day) btn_prev = 4;
 
   /* pedal var mı: pull-up açıkken kopuk pin 1023 okur; pot herhangi bir konumda daha düşük */
   pinMode(PIN_PEDAL, INPUT_PULLUP);  delay(2);
@@ -491,7 +538,8 @@ void setup()
   Serial.print(F("=== twin_emu: 10 Hz pack twin, TX 0x101/0x102, RX 0x201/0x202 | pedal "));
   Serial.print(have_pedal ? F("yes") : F("no"));
   Serial.print(F(" | LCD "));  Serial.print(lcd ? F("yes") : F("no"));
-  Serial.print(F(" | mode "));  Serial.println(MODE_NAME[mode]);
+  Serial.print(F(" | mode "));  Serial.print(MODE_NAME[mode]);
+  Serial.println(hot_day ? F(" | HOT DAY (+15 C)") : F(""));
 
   mcp2515.reset();
   if (mcp2515.setBitrate(CAN_500KBPS, MCP_8MHZ) != MCP2515::ERROR_OK || mcp2515.setNormalMode() != MCP2515::ERROR_OK) {

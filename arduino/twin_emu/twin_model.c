@@ -64,6 +64,7 @@ void twin_init(twin_t *tw, float soc0, float t_amb, float dt)
     for (uint8_t j = 0; j < TW_NG; j++) tw->g[j].v1 = tw->g[j].v2 = 0.0f;
     twin_set_soc(tw, soc0);
     tw->tc = tw->ts = tw->t_amb = t_amb;
+    tw->ru_k = 1.0f;
     tw->dt = dt;
     tw->a1 = expf(-dt / (CELL_R1 * CELL_C1));
     tw->a2 = expf(-dt / (CELL_R2 * CELL_C2));
@@ -110,7 +111,7 @@ void twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float
 
     /* 2 düğümlü termal model (ortalama hücre) */
     const float dtc = (q + (tw->ts - tw->tc) / CELL_RC) / CELL_CC;
-    const float dts = ((tw->t_amb - tw->ts) / CELL_RU - (tw->ts - tw->tc) / CELL_RC) / CELL_CS;
+    const float dts = ((tw->t_amb - tw->ts) / (CELL_RU * tw->ru_k) -(tw->ts - tw->tc) / CELL_RC) / CELL_CS;
     tw->tc += dtc * dt;
     tw->ts += dts * dt;
 

@@ -30,6 +30,7 @@ typedef struct {
     tw_group_t g[TW_NG];
     float tc, ts;               /* ortalama hücre çekirdek / yüzey sıcaklığı [°C] */
     float t_amb;                /* ortam [°C], her adımdan önce dışarıdan yazılabilir */
+    float ru_k;                 /* soğutma direnci çarpanı (1 = sağlam; soğutma arızası 4, twin cooling_fault) */
     float a1, a2, dt;           /* RC ayrıklaştırma katsayıları (ZOH) */
     float v_pack, v_min, v_max; /* çıktı: paket gerilimi, en düşük / en yüksek grup gerilimi */
     float soc_avg;              /* çıktı: grup SOC ortalaması */
