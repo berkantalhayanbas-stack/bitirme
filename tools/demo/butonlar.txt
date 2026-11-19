@@ -16,7 +16,7 @@ bekle cause&1 90   ; 45 C: sicaklik derating, izin kademeli dusuyor
 bekle state==3 60  ; 55 C: LIMP-HOME, izin %25
 bekle state==4 30  ; 60 C: SAFE-STOP, kontaktor acik, far sonuk
 +3 k 2             ; A2: isi kaynagi kalkti, paket soguyor
-bekle Ts<36 120    ; Paket sogudu
+bekle Ts<42 120    ; Paket sogudu (ikiz ortam + 2 °C'ye soğur; LM35 ~38 °C okuyor)
 +0 !reset          ; Servis: ECU yeniden baslatildi
 bekle state==1 30  ; ECU NORMAL
 
