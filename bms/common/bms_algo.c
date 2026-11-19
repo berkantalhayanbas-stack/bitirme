@@ -255,14 +255,22 @@ static uint8_t band(uint8_t f, float ratio)
 
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
-                   uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, decision_out_t *o)
+                   uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
+                   decision_out_t *o)
 {
     const float I_nom_dis = 7.275f * BMS_NP, I_nom_chg = 3.395f * BMS_NP;
 
     /* ---- sert sınırlar (kilitlenir) ---- */
     d->n_lo = (V_min < DEC_V_SAFE_LO) ? d->n_lo + 1 : 0;
     d->n_hi = (V_max > DEC_V_SAFE_HI) ? d->n_hi + 1 : 0;
-    if (Tc_hat > DEC_T_SAFE || d->n_lo >= DEC_N_HARD || d->n_hi >= DEC_N_HARD || !CAN_ok
+    if (T_valid) {                           /* ölçüme bağlı çekirdek sınırı */
+        const float t_ss = T_meas + DEC_K_SS * (T_meas - T_amb);
+        d->n_hl = (t_ss > DEC_T_LIMP) ? d->n_hl + 1 : 0;
+        d->n_hs = (t_ss > DEC_T_SAFE) ? d->n_hs + 1 : 0;
+    } else {
+        d->n_hl = d->n_hs = 0;
+    }
+    if (Tc_hat > DEC_T_SAFE || d->n_hs >= DEC_N_HARD || d->n_lo >= DEC_N_HARD || d->n_hi >= DEC_N_HARD || !CAN_ok
         || d->state == ST_SAFE) {
         d->state = ST_SAFE;  d->i_dis = 0.0f;  d->i_chg = 0.0f;
         o->state = ST_SAFE;  o->i_allow_dis = 0.0f;  o->i_allow_chg = 0.0f;  o->psi = 1.0f;  o->cause = 128;
@@ -301,12 +309,13 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     /* ---- LIMP-HOME ---- */
     const uint8_t sensor_bad = !T_valid || !I_valid || fabsf(bias_est) > DEC_BIAS_MAX;
     const uint8_t empty = SOC_est < DEC_SOC_EMPTY;
-    const uint8_t limp = sensor_bad || Tc_hat > DEC_T_LIMP || empty;
+    const uint8_t hot_ss = d->n_hl >= DEC_N_HARD;
+    const uint8_t limp = sensor_bad || Tc_hat > DEC_T_LIMP || hot_ss || empty;
     if (limp) {
         tgt_dis = minf(minf(DEC_FLOOR * I_nom_dis, i_ds_dis), maxf(sop_dis, 0.f));
         tgt_chg = minf(tgt_chg, DEC_FLOOR * I_nom_chg);
     }
-    const uint16_t cause = (psi_T > 0.f ? 1 : 0) | (psi_C > 0.f ? 2 : 0) | (d->f_sop_dis ? 4 : 0)
+    const uint16_t cause = (psi_T > 0.f || hot_ss ? 1 : 0) | (psi_C > 0.f ? 2 : 0) | (d->f_sop_dis ? 4 : 0)
                          | (d->f_sop_chg ? 8 : 0) | (d->f_ds ? 16 : 0) | (sensor_bad ? 32 : 0)
                          | (empty ? 64 : 0);
 
@@ -360,5 +369,5 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
     o->rr = rint_step(&b->rint, in->I, in->V, o->tc, o->soc, o->i_valid);
 
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
-                  o->t_valid, o->i_valid, in->can_ok, &o->dec);
+                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, &o->dec);
 }

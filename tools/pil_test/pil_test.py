@@ -111,7 +111,7 @@ def main():
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("--n", type=int, default=0, help="samples per scenario (0 = all)")
-    ap.add_argument("--scenarios", default="S6_ntc_open,S3_deep_weak")
+    ap.add_argument("--scenarios", default="S6_ntc_open,S3_deep_weak,S8_ext_heat")
     a = ap.parse_args()
     if not a.sim and not a.port:
         sys.exit("give --port COMx (or --sim)")

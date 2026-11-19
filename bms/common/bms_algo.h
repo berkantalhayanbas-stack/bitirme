@@ -52,6 +52,7 @@ enum { ST_NORMAL = 1, ST_DERATE = 2, ST_LIMP = 3, ST_SAFE = 4 };
 typedef struct {
     uint8_t state, therm_on, cool_on, f_ds, f_sop_dis, f_sop_chg;
     int   n_ok, n_lo, n_hi, n_run;   /* n_run: açılıştan beri örnek (soğutma alarmı beklemesi) */
+    int   n_hl, n_hs;                /* ölçüme bağlı çekirdek sınırı: LIMP / SAFE süre sayaçları */
     float i_dis, i_chg;
 } decision_t;
 typedef struct {
@@ -62,7 +63,8 @@ typedef struct {
 void decision_init(decision_t *d);
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
-                   uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, decision_out_t *o);
+                   uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
+                   decision_out_t *o);
 
 /* ------------------------------------------------------------ ML: SOH ağacı */
 float soh_tree(float efc, float days, float T, float m, float dod, float rr);

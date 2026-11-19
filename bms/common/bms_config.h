@@ -76,6 +76,11 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_FLOOR       0.25f
 #define DEC_T_LIMP      55.0f
 #define DEC_T_SAFE      60.0f
+#define DEC_K_SS        (CELL_RC / CELL_RU)  /* ölçüme bağlı çekirdek sınırı T_ss = Tm + k (Tm - Ta):
+                                       kararlı halde Tc - Ts = Rc/Ru (Ts - Ta), ısının kaynağından
+                                       bağımsız. Gözlemci modellenmemiş ısıyı (dış kaynak, iç kısa
+                                       devre başlangıcı) görmez; T_ss > 55 / 60 °C (1 s) LIMP / SAFE.
+                                       HIL 3. bulgu: A2'de SAFE gerçek çekirdek 66 °C'de geliyordu. */
 #define DEC_SOC_EMPTY   0.03f
 #define DEC_V_SAFE_LO   2.50f
 #define DEC_V_SAFE_HI   4.25f
