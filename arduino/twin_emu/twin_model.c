@@ -18,7 +18,9 @@
 #define CELL_C1     1075.0f
 #define CELL_R2     0.012f
 #define CELL_C2     15000.0f
-#define CELL_EA_R0  20000.0f
+#define CELL_EA_R0  6200.0f      /* Kirkaldy 2024 (bitirme veri/ea_kirkaldy.py) */
+#define CELL_EA_R1  17500.0f
+#define CELL_EA_R2  14300.0f
 #define RGAS        8.314f
 #define CELL_CC     64.0f
 #define CELL_CS     5.0f
@@ -85,7 +87,12 @@ void twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float
     const float ibs = ib * (k_soc - 1.0f);  /* hızlandırmanın SOC'ye eklenen kısmı (gerilime değil) */
     const float dt = tw->dt;
     /* R0 sıcaklık çarpanı (Arrhenius) tüm gruplar için aynı: bir kez hesapla */
-    const float r0t = CELL_R0 * expf(CELL_EA_R0 / RGAS * (1.0f / (tw->tc + 273.15f) - 1.0f / 298.15f));
+    const float u   = 1.0f / (tw->tc + 273.15f) - 1.0f / 298.15f;
+    const float r0t = CELL_R0 * expf(CELL_EA_R0 / RGAS * u);
+    const float r1t = CELL_R1 * expf(CELL_EA_R1 / RGAS * u);   /* RC dalları da sıcaklığa bağlı, C sabit */
+    const float r2t = CELL_R2 * expf(CELL_EA_R2 / RGAS * u);
+    tw->a1 = expf(-dt / (r1t * CELL_C1));
+    tw->a2 = expf(-dt / (r2t * CELL_C2));
     float q = 0.0f, vs = 0.0f, ss = 0.0f, vmin = 10.0f, vmax = 0.0f, smin = 2.0f, smax = -1.0f;
 
     for (uint8_t j = 0; j < TW_NG; j++) {
@@ -95,8 +102,8 @@ void twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float
         const float ig  = on ? i + ib : i;
         const float ocv = twin_ocv(g->soc);
         const float r0  = r0t * (1.0f + 0.6f * expf(-g->soc / 0.08f)) * kr;   /* + düşük SOC artışı */
-        g->v1 = tw->a1 * g->v1 + CELL_R1 * kr * (1.0f - tw->a1) * ig;
-        g->v2 = tw->a2 * g->v2 + CELL_R2 * kr * (1.0f - tw->a2) * ig;
+        g->v1 = tw->a1 * g->v1 + r1t * kr * (1.0f - tw->a1) * ig;
+        g->v2 = tw->a2 * g->v2 + r2t * kr * (1.0f - tw->a2) * ig;
         g->v  = ocv - r0 * ig - g->v1 - g->v2;
         q += i * (ocv - g->v);              /* Bernardi tersinmez ısı (entropik terim ihmal) */
         g->soc -= (on ? ig + ibs : ig) * dt / (3600.0f * CELL_Q_AH * GRP_KQ(j));

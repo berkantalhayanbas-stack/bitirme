@@ -16,7 +16,9 @@
 #define CELL_C1         1075.0f
 #define CELL_R2         0.012f
 #define CELL_C2         15000.0f
-#define CELL_EA_R0      20000.0f    /* [J/mol] */
+#define CELL_EA_R0      6200.0f     /* [J/mol] Arrhenius: Kirkaldy 2024 ham döngü verisi, 8 hücre */
+#define CELL_EA_R1      17500.0f    /*   15-40 °C, 5 A basamağı (bitirme veri/ea_kirkaldy.py): R0 =   */
+#define CELL_EA_R2      14300.0f    /*   0,05 s ohmik, R1 / R2 = 10 s / 30 s polarizasyonu            */
 #define RGAS            8.314f
 #define CELL_CC         64.0f       /* [J/K] */
 #define CELL_CS         5.0f
@@ -70,7 +72,6 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_V_LIM_DIS   2.90f
 #define DEC_V_LIM_CHG   4.18f
 #define DEC_K_SOP       0.3f
-#define DEC_R_RC        (0.0093f + 0.012f)
 #define DEC_BAND_ON     0.90f
 #define DEC_BAND_OFF    1.00f
 #define DEC_FLOOR       0.25f

@@ -22,10 +22,11 @@ static float dpolyval(const float *p, int n, float x)      /* türev */
     for (int k = 0; k < n - 1; k++) y = y * x + p[k] * (float)(n - 1 - k);
     return y;
 }
-static float arrhenius(float T)
-{
-    return expf(CELL_EA_R0 / RGAS * (1.0f / (T + 273.15f) - 1.0f / 298.15f));
+static float arrhenius_ea(float ea, float T)
+{   /* R(T) / R(25 °C) */
+    return expf(ea / RGAS * (1.0f / (T + 273.15f) - 1.0f / 298.15f));
 }
+static float arrhenius(float T) { return arrhenius_ea(CELL_EA_R0, T); }
 static float interp_tab(const float *xs, const float *ys, int n, float x)
 {   /* np.interp(x, xs, ys, left=0, right=0) */
     if (x < xs[0] || x > xs[n - 1]) return 0.0f;
@@ -48,8 +49,6 @@ void ekf_init(ekf_t *e, float soc0, float q_scale, float r_scale)
     e->r0_ref = r_scale * CELL_R0 * k;
     e->r1 = r_scale * CELL_R1 * k;
     e->r2 = r_scale * CELL_R2 * k;
-    e->a1 = expf(-BMS_TS / (e->r1 * (CELL_C1 / k)));
-    e->a2 = expf(-BMS_TS / (e->r2 * (CELL_C2 / k)));
     e->q_ah = q_scale * CELL_Q_AH * BMS_NP;
 }
 
@@ -58,16 +57,21 @@ void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, u
     const float qd[4] = EKF_Q;
     float A[4][4] = {{0}}, Pp[4][4], AP[4][4], C[4], PC[4], K[4], xp[4];
     const float r0 = e->r0_ref * arrhenius(T_use);
+    const float kp = (float)BMS_NS / (float)BMS_NP;
+    const float r1 = e->r1 * arrhenius_ea(CELL_EA_R1, T_use);    /* RC dalları da sıcaklığa bağlı */
+    const float r2 = e->r2 * arrhenius_ea(CELL_EA_R2, T_use);
+    e->a1 = expf(-BMS_TS / (r1 * (CELL_C1 / kp)));
+    e->a2 = expf(-BMS_TS / (r2 * (CELL_C2 / kp)));
     const float i = i_meas - e->x[3];
     const float kc = BMS_TS / (3600.0f * e->q_ah);
 
     /* ---- tahmin ---- */
     xp[0] = e->x[0] - kc * i;
-    xp[1] = e->a1 * e->x[1] + e->r1 * (1.0f - e->a1) * i;
-    xp[2] = e->a2 * e->x[2] + e->r2 * (1.0f - e->a2) * i;
+    xp[1] = e->a1 * e->x[1] + r1 * (1.0f - e->a1) * i;
+    xp[2] = e->a2 * e->x[2] + r2 * (1.0f - e->a2) * i;
     xp[3] = e->x[3];
     A[0][0] = 1.0f;  A[1][1] = e->a1;  A[2][2] = e->a2;  A[3][3] = 1.0f;
-    A[0][3] = kc;  A[1][3] = -e->r1 * (1.0f - e->a1);  A[2][3] = -e->r2 * (1.0f - e->a2);
+    A[0][3] = kc;  A[1][3] = -r1 * (1.0f - e->a1);  A[2][3] = -r2 * (1.0f - e->a2);
     for (int r = 0; r < 4; r++)
         for (int c = 0; c < 4; c++) {
             float s = 0.0f;
@@ -297,7 +301,8 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     const float r0 = CELL_R0 * arrhenius(Tc_hat);
     const float sop_dis = maxf(I_meas, 0.f) + DEC_K_SOP * BMS_NP * (V_min - DEC_V_LIM_DIS) / r0;
     const float sop_chg = maxf(-I_meas, 0.f) + DEC_K_SOP * BMS_NP * (DEC_V_LIM_CHG - V_max) / r0;
-    const float r_dc = r0 + DEC_R_RC, ic = I_meas / BMS_NP;
+    const float r_dc = r0 + CELL_R1 * arrhenius_ea(CELL_EA_R1, Tc_hat) + CELL_R2 * arrhenius_ea(CELL_EA_R2, Tc_hat);
+    const float ic = I_meas / BMS_NP;
     const float qs_dis = BMS_NP * (V_min + maxf(ic, 0.f) * r0 - DEC_V_LIM_DIS) / r_dc;
     const float qs_chg = BMS_NP * (DEC_V_LIM_CHG - (V_max - maxf(-ic, 0.f) * r0)) / r_dc;
     d->f_sop_dis = band(d->f_sop_dis, qs_dis / maxf(i_ds_dis, 1e-6f));
