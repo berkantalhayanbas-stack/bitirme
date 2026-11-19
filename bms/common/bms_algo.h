@@ -8,9 +8,10 @@
 #include <stdint.h>
 
 /* ------------------------------------------------------------ SOC EKF */
+#define EKF_N 5
 typedef struct {
-    float x[4];          /* SOC, V1, V2, b_I */
-    float P[4][4];
+    float x[EKF_N];      /* SOC, V1, V2, b_I, k_R (R0 ölçeği; A7) */
+    float P[EKF_N][EKF_N];
     float r0_ref, r1, r2, a1, a2, q_ah;
     int   n_rej;
 } ekf_t;
@@ -31,8 +32,8 @@ void thermal_step(thermal_t *t, float i_meas, float v_meas, float soc_est, float
 
 /* ------------------------------------------------------------ sensör teşhisi */
 typedef struct {
-    float t_prev, i_prev;
-    int   n_t, n_i;
+    float t_prev, i_prev, t_lp;     /* t_lp: değişim hızı teşhisi için hızlı süzgeç */
+    int   n_t, n_i, n_rate;
     uint8_t first, t_valid, i_valid;
 } diag_t;
 void diag_init(diag_t *d);

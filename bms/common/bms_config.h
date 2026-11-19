@@ -33,8 +33,10 @@ static const float OCV_POLY[OCV_POLY_N] = {
     104.426799217f, -30.805913718f, 6.20417948038f, 2.89779228523f };
 
 /* ---- SOC EKF, x = [SOC V1 V2 b_I] ---- */
-#define EKF_P0          { 0.1f, 0.01f, 0.01f, 1.0f }
-#define EKF_Q           { 1e-10f, 1e-6f, 1e-6f, 1e-8f }
+#define EKF_P0          { 0.1f, 0.01f, 0.01f, 1.0f, 0.01f }  /* son: k_R ±%10 */
+#define EKF_Q           { 1e-10f, 1e-6f, 1e-6f, 1e-8f, 1e-8f }
+#define EKF_KR_MIN      0.5f        /* k_R = gerçek R0 / nominal R0 sınırları */
+#define EKF_KR_MAX      2.0f
 #define EKF_R           (0.25f * 0.25f)
 #define EKF_GATE        10.0f       /* normalize inovasyon kapısı [sigma] */
 #define EKF_N_REJ       5           /* art arda red sınırı -> kapı açılır */
@@ -48,7 +50,11 @@ static const float OCV_POLY[OCV_POLY_N] = {
 /* ---- sensör teşhisi ---- */
 #define DIAG_T_MIN      (-30.0f)
 #define DIAG_T_MAX      85.0f
-#define DIAG_T_RATE     2.0f        /* [°C / örnek] */
+#define DIAG_T_RATE     2.0f        /* [°C] ölçümün hızlı süzgeçten farkı, DIAG_N_RATE örnek üst üste.
+                                       Tek örneklik |dT| > 2 °C kuralı 2 kat gürültüde (0,6 °C) sahte
+                                       arıza verip sürüşü LIMP'e kilitliyordu (A3/A8). */
+#define DIAG_T_ALPHA    0.28f       /* 1 - exp(-0,1 / 0,3 s) */
+#define DIAG_N_RATE     3
 #define DIAG_N_FROZEN   50          /* 5 s */
 
 /* ---- çevrimiçi direnç kestiricisi ---- */
@@ -86,7 +92,7 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_V_SAFE_LO   2.50f
 #define DEC_V_SAFE_HI   4.25f
 #define DEC_N_HARD      10          /* 1 s */
-#define DEC_BIAS_MAX    5.0f
+#define DEC_BIAS_MAX    8.0f        /* [A] 5 A: direnç uyumsuzluğunda sahte sensör LIMP'i (A3/A7) */
 #define DEC_N_EXIT      100         /* 10 s */
 #define DEC_RAMP_UP     10.0f       /* [A/s] */
 /* veri sayfası sürekli akım sınırları [A/hücre], 2 °C geçişli parçalı doğrusal tablo */

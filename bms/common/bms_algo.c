@@ -41,11 +41,12 @@ static float interp_tab(const float *xs, const float *ys, int n, float x)
 /* =================================================================== SOC EKF */
 void ekf_init(ekf_t *e, float soc0, float q_scale, float r_scale)
 {
-    const float p0[4] = EKF_P0;
+    const float p0[EKF_N] = EKF_P0;
     const float k = (float)BMS_NS / (float)BMS_NP;
     memset(e, 0, sizeof(*e));
     e->x[0] = soc0;
-    for (int i = 0; i < 4; i++) e->P[i][i] = p0[i];
+    e->x[4] = 1.0f;
+    for (int i = 0; i < EKF_N; i++) e->P[i][i] = p0[i];
     e->r0_ref = r_scale * CELL_R0 * k;
     e->r1 = r_scale * CELL_R1 * k;
     e->r2 = r_scale * CELL_R2 * k;
@@ -54,14 +55,15 @@ void ekf_init(ekf_t *e, float soc0, float q_scale, float r_scale)
 
 void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, uint8_t *rejected)
 {
-    const float qd[4] = EKF_Q;
-    float A[4][4] = {{0}}, Pp[4][4], AP[4][4], C[4], PC[4], K[4], xp[4];
+    const float qd[EKF_N] = EKF_Q;
+    float A[EKF_N][EKF_N] = {{0}}, Pp[EKF_N][EKF_N], AP[EKF_N][EKF_N], C[EKF_N], PC[EKF_N], K[EKF_N], xp[EKF_N];
     const float r0 = e->r0_ref * arrhenius(T_use);
     const float kp = (float)BMS_NS / (float)BMS_NP;
     const float r1 = e->r1 * arrhenius_ea(CELL_EA_R1, T_use);    /* RC dalları da sıcaklığa bağlı */
     const float r2 = e->r2 * arrhenius_ea(CELL_EA_R2, T_use);
     e->a1 = expf(-BMS_TS / (r1 * (CELL_C1 / kp)));
     e->a2 = expf(-BMS_TS / (r2 * (CELL_C2 / kp)));
+    const float kr = e->x[4];
     const float i = i_meas - e->x[3];
     const float kc = BMS_TS / (3600.0f * e->q_ah);
 
@@ -70,33 +72,34 @@ void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, u
     xp[1] = e->a1 * e->x[1] + r1 * (1.0f - e->a1) * i;
     xp[2] = e->a2 * e->x[2] + r2 * (1.0f - e->a2) * i;
     xp[3] = e->x[3];
-    A[0][0] = 1.0f;  A[1][1] = e->a1;  A[2][2] = e->a2;  A[3][3] = 1.0f;
+    xp[4] = kr;
+    A[0][0] = 1.0f;  A[1][1] = e->a1;  A[2][2] = e->a2;  A[3][3] = 1.0f;  A[4][4] = 1.0f;
     A[0][3] = kc;  A[1][3] = -r1 * (1.0f - e->a1);  A[2][3] = -r2 * (1.0f - e->a2);
-    for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) {
+    for (int r = 0; r < EKF_N; r++)
+        for (int c = 0; c < EKF_N; c++) {
             float s = 0.0f;
-            for (int k = 0; k < 4; k++) s += A[r][k] * e->P[k][c];
+            for (int k = 0; k < EKF_N; k++) s += A[r][k] * e->P[k][c];
             AP[r][c] = s;
         }
-    for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) {
+    for (int r = 0; r < EKF_N; r++)
+        for (int c = 0; c < EKF_N; c++) {
             float s = 0.0f;
-            for (int k = 0; k < 4; k++) s += AP[r][k] * A[c][k];
+            for (int k = 0; k < EKF_N; k++) s += AP[r][k] * A[c][k];
             Pp[r][c] = s + (r == c ? qd[r] : 0.0f);
         }
 
     /* ---- düzeltme ---- */
     const float s_cl = clampf(xp[0], 0.0f, 1.0f);
-    const float y_hat = BMS_NS * polyval(OCV_POLY, OCV_POLY_N, s_cl) - r0 * i - xp[1] - xp[2];
-    C[0] = BMS_NS * dpolyval(OCV_POLY, OCV_POLY_N, s_cl);  C[1] = -1.0f;  C[2] = -1.0f;  C[3] = r0;
+    const float y_hat = BMS_NS * polyval(OCV_POLY, OCV_POLY_N, s_cl) - kr * r0 * i - xp[1] - xp[2];
+    C[0] = BMS_NS * dpolyval(OCV_POLY, OCV_POLY_N, s_cl);  C[1] = -1.0f;  C[2] = -1.0f;  C[3] = kr * r0;  C[4] = -r0 * i;
     float S = EKF_R;
-    for (int r = 0; r < 4; r++) {
+    for (int r = 0; r < EKF_N; r++) {
         float s = 0.0f;
-        for (int c = 0; c < 4; c++) s += Pp[r][c] * C[c];
+        for (int c = 0; c < EKF_N; c++) s += Pp[r][c] * C[c];
         PC[r] = s;
         S += C[r] * s;
     }
-    for (int r = 0; r < 4; r++) K[r] = PC[r] / S;
+    for (int r = 0; r < EKF_N; r++) K[r] = PC[r] / S;
     *innov = v_meas - y_hat;
 
     *rejected = (fabsf(*innov) > EKF_GATE * sqrtf(S)) && (e->n_rej < EKF_N_REJ);
@@ -107,21 +110,22 @@ void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, u
         return;
     }
     e->n_rej = 0;
-    for (int r = 0; r < 4; r++) e->x[r] = xp[r] + K[r] * (*innov);
+    for (int r = 0; r < EKF_N; r++) e->x[r] = xp[r] + K[r] * (*innov);
+    e->x[4] = clampf(e->x[4], EKF_KR_MIN, EKF_KR_MAX);
     /* Joseph formu: P = (I-KC) Pp (I-KC)' + R K K' */
-    float IKC[4][4], T1[4][4];
-    for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) IKC[r][c] = (r == c ? 1.0f : 0.0f) - K[r] * C[c];
-    for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) {
+    float IKC[EKF_N][EKF_N], T1[EKF_N][EKF_N];
+    for (int r = 0; r < EKF_N; r++)
+        for (int c = 0; c < EKF_N; c++) IKC[r][c] = (r == c ? 1.0f : 0.0f) - K[r] * C[c];
+    for (int r = 0; r < EKF_N; r++)
+        for (int c = 0; c < EKF_N; c++) {
             float s = 0.0f;
-            for (int k = 0; k < 4; k++) s += IKC[r][k] * Pp[k][c];
+            for (int k = 0; k < EKF_N; k++) s += IKC[r][k] * Pp[k][c];
             T1[r][c] = s;
         }
-    for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) {
+    for (int r = 0; r < EKF_N; r++)
+        for (int c = 0; c < EKF_N; c++) {
             float s = 0.0f;
-            for (int k = 0; k < 4; k++) s += T1[r][k] * IKC[c][k];
+            for (int k = 0; k < EKF_N; k++) s += T1[r][k] * IKC[c][k];
             e->P[r][c] = s + EKF_R * K[r] * K[c];
         }
 }
@@ -206,7 +210,11 @@ void diag_step(diag_t *d, float i_meas, float T_meas)
     if (!d->first) {
         d->n_t = (T_meas == d->t_prev) ? d->n_t + 1 : 0;   /* CAN değerleri: tam eşitlik anlamlı */
         d->n_i = (i_meas == d->i_prev) ? d->n_i + 1 : 0;
-        if (fabsf(T_meas - d->t_prev) > DIAG_T_RATE) d->t_valid = 0;
+        d->n_rate = (fabsf(T_meas - d->t_lp) > DIAG_T_RATE) ? d->n_rate + 1 : 0;
+        if (d->n_rate >= DIAG_N_RATE) d->t_valid = 0;
+        d->t_lp += DIAG_T_ALPHA * (T_meas - d->t_lp);
+    } else {
+        d->t_lp = T_meas;
     }
     if (T_meas < DIAG_T_MIN || T_meas > DIAG_T_MAX || d->n_t >= DIAG_N_FROZEN) d->t_valid = 0;
     if (d->n_i >= DIAG_N_FROZEN) d->i_valid = 0;
