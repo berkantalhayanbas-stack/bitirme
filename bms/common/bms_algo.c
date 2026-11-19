@@ -259,10 +259,14 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
 {
     const float I_nom_dis = 7.275f * BMS_NP, I_nom_chg = 3.395f * BMS_NP;
 
-    /* ---- sert sınırlar (kilitlenir) ---- */
+    /* ---- sert sınırlar (kilitlenir) ----
+     * Sonlu olmayan (NaN/Inf) girdi ya da kestirim: tüm karşılaştırmalar yanlış döneceği için sert
+     * sınırlar sessizce atlanırdı; bu yüzden doğrudan SAFE (neden 128). Normal çalışmada etkisi yok. */
+    const uint8_t nonfinite = !(isfinite(I_meas) && isfinite(V_min) && isfinite(V_max) && isfinite(Tc_hat)
+                                && isfinite(Ts_hat) && isfinite(Ru_hat) && isfinite(SOC_est) && isfinite(bias_est));
     d->n_lo = (V_min < DEC_V_SAFE_LO) ? d->n_lo + 1 : 0;
     d->n_hi = (V_max > DEC_V_SAFE_HI) ? d->n_hi + 1 : 0;
-    if (Tc_hat > DEC_T_SAFE || d->n_lo >= DEC_N_HARD || d->n_hi >= DEC_N_HARD || !CAN_ok
+    if (nonfinite || Tc_hat > DEC_T_SAFE || d->n_lo >= DEC_N_HARD || d->n_hi >= DEC_N_HARD || !CAN_ok
         || d->state == ST_SAFE) {
         d->state = ST_SAFE;  d->i_dis = 0.0f;  d->i_chg = 0.0f;
         o->state = ST_SAFE;  o->i_allow_dis = 0.0f;  o->i_allow_chg = 0.0f;  o->psi = 1.0f;  o->cause = 128;
@@ -361,4 +365,14 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
 
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
                   o->t_valid, o->i_valid, in->can_ok, &o->dec);
+
+    /* Sonlu olmayan kestirimler CAN'a (0x202) ve rapora taşınmasın: karar zaten SAFE'e kilitlendi,
+     * gösterilen değerler 0 olur (float -> tamsayı dönüşümünde tanımsız davranış önlenir). */
+    if (!isfinite(o->soc))   o->soc = 0.0f;
+    if (!isfinite(o->bias))  o->bias = 0.0f;
+    if (!isfinite(o->innov)) o->innov = 0.0f;
+    if (!isfinite(o->tc))    o->tc = 0.0f;
+    if (!isfinite(o->ts))    o->ts = 0.0f;
+    if (!isfinite(o->ru))    o->ru = 0.0f;
+    if (!isfinite(o->rr))    o->rr = 1.0f;
 }
