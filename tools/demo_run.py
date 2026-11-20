@@ -26,6 +26,9 @@ import time
 
 import serial
 
+# yönlendirilmiş çıktıda (Windows cp1252) Türkçe karakter çökmesin
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ap = argparse.ArgumentParser()
 ap.add_argument("senaryo")
 ap.add_argument("--emu", default="COM10")

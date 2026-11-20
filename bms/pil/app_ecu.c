@@ -71,6 +71,12 @@
 #define SOC0_EKF  0.5f                      /* EKF başlangıç SOC'si (PIL ile aynı) */
 #define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
 #define ECU_STEP_HOLD_MS  100u               /* tutulan değerle adım periyodu (BMS_TS) */
+/* Açılışta ilk 50 ms'de gelen çerçeveler atılır: ECU sıfırlanırken hatta ACK veren olmadığından EMU
+ * (MCP2515) son çerçevelerini tekrar gönderip bekletir; ECU açılınca bu BAYAT çerçeveler (sıfırlama
+ * anındaki yük akımı) teslim edilir ve 1 s sıfır akım kontrolünü (A9) bozar: sürüşte sıfırlamada
+ * 2/10 örnek 44 A -> ortalama 9,5 A -> sahte sensör LIMP'i + EKF'ye yanlış ofset (2026-11-20).
+ * Taze çerçeve 100 ms'de bir gelir; 50 ms en çok bir taze çifti kaybettirir (ilk zaman aşımı 2 s). */
+#define ECU_RX_FLUSH_MS   50u
 
 enum { R_M1, R_M2, N_RX };                   /* zaman aşımı izlenen periyodik mesajlar */
 
@@ -78,7 +84,7 @@ static bms_t bms;
 static can_monitor_t mon[N_RX];
 static can_meas1_t m1;
 static uint8_t have_m1;
-static uint32_t n_hold, other, tx_busy, cyc_max;
+static uint32_t n_hold, other, tx_busy, cyc_max, n_flush;
 static uint32_t n_cmd, n_cmd_rej, n_cmd_emu, n_cmd_crc, n_cmd_dup;
 static uint8_t boot_safe;                    /* BMS_SAFETY: watchdog reseti ya da flash CRC hatası */
 /* adım 8: grup gerilimleri (0x110-0x114) ve pasif dengeleme (0x210) */
@@ -352,6 +358,7 @@ void ecu_run(void)
         {
             uint16_t id;  uint8_t d[8], len, c;
             while (can_get(&id, d, &len)) {
+                if (now_ms <= ECU_RX_FLUSH_MS) { n_flush++; continue; }   /* bayat açılış çerçeveleri */
                 if (len != 8) { other++; continue; }
                 if (id == CAN_ID_EMU_MEAS1) {
                     can_meas1_t a;
@@ -492,7 +499,7 @@ void ecu_run(void)
                 }
                 if (mon[m].safe) put_s("!SAFE"); else if (mon[m].fault) put_s("!TO");
             }
-            kv(" hold:", n_hold); kv(" other:", other);
+            kv(" hold:", n_hold); kv(" other:", other);  if (n_flush) kv(" flush:", n_flush);
             kv(" | cmd:", n_cmd);
             if (n_cmd_rej || n_cmd_emu || n_cmd_crc || n_cmd_dup) {
                 kv("(rej", n_cmd_rej); kv(" emu", n_cmd_emu); kv(" crc", n_cmd_crc); kv(" dup", n_cmd_dup);
