@@ -1,4 +1,11 @@
 Options -Indexes
+DirectoryIndex index.html
+# Sitenin kök .htaccess'i ".php" uzantısını 301 ile kaldırıyor (hizlipdf.net, LiteSpeed). 301, POST'u
+# GET'e çevirir: gateway'in api.php isteği kaybolur. Bu klasörde kendi RewriteEngine'imiz olunca üst
+# klasörün kuralları miras alınmaz (RewriteOptions Inherit yok).
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+</IfModule>
 <Files "config.php">
   Require all denied
 </Files>

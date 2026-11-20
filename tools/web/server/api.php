@@ -1,5 +1,5 @@
 <?php
-// POST JSON: {"rows":[...], "events":[...], "runs":[...]}  Header: X-API-Key
+// POST JSON: {"rows":[...], "events":[...], "runs":[...]}  Header: X-API-Key  (SQLite, config.php)
 require __DIR__ . '/config.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') out(['error' => 'POST only'], 405);
@@ -13,8 +13,9 @@ $pdo->beginTransaction();
 try {
     $n = 0;
     // önce başlayan senaryolar: aynı numara yeniden koşuyorsa eski izi sil (canlı mod run 0 korunur)
-    $rs = $pdo->prepare('INSERT INTO runs (run_id,name) VALUES (?,?)
-                         ON DUPLICATE KEY UPDATE name=VALUES(name), started_at=NOW(), ended_at=NULL, result="RUNNING", summary=NULL');
+    $rs = $pdo->prepare("INSERT INTO runs (run_id,name) VALUES (?,?)
+                         ON CONFLICT(run_id) DO UPDATE SET name=excluded.name, started_at=CURRENT_TIMESTAMP,
+                         ended_at=NULL, result='RUNNING', summary=NULL");
     $dt = $pdo->prepare('DELETE FROM telemetry WHERE run_id=? AND run_id>0');
     $de = $pdo->prepare('DELETE FROM events WHERE run_id=? AND run_id>0');
     foreach ($in['runs'] ?? [] as $r) {
@@ -36,7 +37,7 @@ try {
         $se->execute([(int)$e['run'], (int)$e['t'], substr($e['code'], 0, 32), substr($e['detail'] ?? '', 0, 255)]);
     }
 
-    $re = $pdo->prepare('UPDATE runs SET ended_at=NOW(), result=?, summary=? WHERE run_id=?');
+    $re = $pdo->prepare('UPDATE runs SET ended_at=CURRENT_TIMESTAMP, result=?, summary=? WHERE run_id=?');
     foreach ($in['runs'] ?? [] as $r) {
         if ($r['op'] === 'end') $re->execute([$r['result'] === 'PASS' ? 'PASS' : 'FAIL', substr($r['summary'] ?? '', 0, 255), (int)$r['id']]);
     }

@@ -1,30 +1,31 @@
--- cPanel > phpMyAdmin > SQL sekmesine yapıştır
+-- SQLite şeması: config.php her bağlantıda çalıştırır (IF NOT EXISTS), elle çalıştırmak gerekmez.
+-- Zamanlar UTC (CURRENT_TIMESTAMP). mock_server.py aynı şemayı kullanır.
 CREATE TABLE IF NOT EXISTS runs (
-  run_id     INT UNSIGNED PRIMARY KEY,
-  name       VARCHAR(64) NOT NULL,
-  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  ended_at   DATETIME NULL,
-  result     ENUM('RUNNING','PASS','FAIL') NOT NULL DEFAULT 'RUNNING',
-  summary    VARCHAR(255) NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  run_id     INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ended_at   TEXT,
+  result     TEXT NOT NULL DEFAULT 'RUNNING',        -- RUNNING | PASS | FAIL
+  summary    TEXT
+);
 
 CREATE TABLE IF NOT EXISTS telemetry (
-  id       BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  run_id   INT UNSIGNED NOT NULL DEFAULT 0,
-  t_ms     INT UNSIGNED NOT NULL,
-  soc      FLOAT, soh FLOAT, temp FLOAT, i_allow FLOAT,
-  state    TINYINT UNSIGNED,      -- 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP (bms_algo.h)
-  tec      SMALLINT UNSIGNED, rec SMALLINT UNSIGNED,
-  rx_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX (run_id, t_ms)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id   INTEGER NOT NULL DEFAULT 0,               -- 0 = canlı mod, > 0 = Monte Carlo koşusu
+  t_ms     INTEGER NOT NULL,
+  soc      REAL, soh REAL, temp REAL, i_allow REAL,
+  state    INTEGER,                                  -- 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP (bms_algo.h)
+  tec      INTEGER, rec INTEGER,
+  rx_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS telemetry_run ON telemetry (run_id, t_ms);
 
 CREATE TABLE IF NOT EXISTS events (
-  id     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  run_id INT UNSIGNED NOT NULL DEFAULT 0,
-  t_ms   INT UNSIGNED NOT NULL,
-  code   VARCHAR(32) NOT NULL,
-  detail VARCHAR(255) NULL,
-  rx_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX (run_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL DEFAULT 0,
+  t_ms   INTEGER NOT NULL,
+  code   TEXT NOT NULL,
+  detail TEXT,
+  rx_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS events_run ON events (run_id);

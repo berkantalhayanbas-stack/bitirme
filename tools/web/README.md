@@ -24,11 +24,13 @@ python tools/web/gateway.py COM9
 - Adres `BMS_URL` ile değiştirilebilir; varsayılan `https://hizlipdf.net/bitirmeprj/api.php`.
 - İnternet yoksa gönderilecekler `build/web/spool.jsonl` dosyasında kuyruğa alınır. Ham satırlar `build/web/log_*.txt` dosyasına yazılır.
 
-## Sunucu (paylaşımlı hosting, PHP + MySQL)
-1. `server/schema.sql` dosyasını phpMyAdmin'de çalıştır.
-2. `server/config.sample.php` dosyasını `config.php` adıyla kopyala. Veritabanı bilgilerini ve uzun, rastgele bir `API_KEY` gir. **`config.php` git dışıdır, depoya koyma.**
-3. `server/` içeriğini FTP ile yükle: `.htaccess`, `api.php`, `data.php`, `index.html`, `config.php`.
-   - `.htaccess`, `config.php`, `config.sample.php` ve `schema.sql` dosyalarına dışarıdan erişimi kapatır.
+## Sunucu (paylaşımlı hosting, PHP + SQLite)
+Veritabanı kurulumu gerekmez. PHP ilk istekte SQLite dosyasını kendisi oluşturur: tercihen web kökünün dışında `~/bitirmeprj_data/bms.sqlite`, olmazsa `data/` alt klasöründe, dışarıya kapalı. Tek gizli ayar `config.php` içindeki `API_KEY`'dir ve gateway'deki anahtarla aynı olmalıdır.
+1. Paketi hazırla (anahtar yoksa üretir, `config.php`'yi yazar; ikisi de git dışıdır): `build/web/bitirmeprj_upload.zip`
+2. cPanel > File Manager > `public_html/bitirmeprj/` > Upload > zip'i seç > zip'e sağ tık > Extract > zip'i sil.
+3. Kontrol: `https://hizlipdf.net/bitirmeprj/data.php?q=ping` -> `{"ok":true,...}`
+   - `.htaccess`, sitenin `.php` uzantısını kaldıran 301 yönlendirmesini bu klasörde kapatır (301, POST'u GET'e çevirir).
+   - `config.php`, `config.sample.php` ve `schema.sql` dosyalarına dışarıdan erişim kapalıdır.
 
 ## Yerel deneme (hosting olmadan, sunum yedeği)
 ```

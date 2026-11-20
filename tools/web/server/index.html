@@ -68,7 +68,8 @@ const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
 // cihazdan gelen metin (olay ayrıntısı, senaryo adı) HTML olarak yorumlanmasın
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const MAXP = 600;
-let lastId = 0;
+let lastId = 0, lastRun = null;      // kaynak (canlı run 0 / Monte Carlo koşusu) değişince grafik sıfırlanır
+const clear = ch => { ch.data.labels = []; ch.data.datasets.forEach(d => d.data = []); };
 const opt = { animation:false, responsive:true, plugins:{ legend:{ labels:{ color:'#e6e8eb' } } },
   scales:{ x:{ ticks:{ color:'#8a93a3', maxTicksLimit:6 } }, y:{ ticks:{ color:'#8a93a3' } }, y2:{ position:'right', ticks:{ color:'#8a93a3' }, grid:{ display:false } } },
   elements:{ point:{ radius:0 } } };
@@ -91,6 +92,8 @@ async function live() {
     const r = await fetch(`data.php?q=live&since=${lastId}`);
     const j = await r.json();
     for (const x of j.rows) {
+      if (lastRun !== null && +x.run_id !== lastRun) { clear(c1); clear(c2); }
+      lastRun = +x.run_id;
       const lbl = (x.t_ms / 1000).toFixed(1);
       push(c1, lbl, [x.soc, x.soh]);
       push(c2, lbl, [x.temp, x.i_allow]);

@@ -1,18 +1,27 @@
 <?php
-// config.sample.php -> config.php olarak kopyala, cPanel > MySQL Databases bilgilerini gir (config.php git dışı)
-const DB_HOST = 'localhost';
-const DB_NAME = 'KULLANICI_bitirme';
-const DB_USER = 'KULLANICI_bms';
-const DB_PASS = 'DEGISTIR';
-const API_KEY = 'DEGISTIR_uzun_rastgele_anahtar';   // gateway.py ile aynı
+// Sunucu ayarı. config.php olarak kopyalanır (git dışı); tek ayar API_KEY (gateway.py ile aynı).
+// Veritabanı SQLite: tek dosya, PHP ilk istekte kendisi oluşturur (MySQL kurulumu, kullanıcı, parola yok).
+// Dosya web kökünün DIŞINDA tutulur (~/bitirmeprj_data/bms.sqlite); yazılamazsa bu klasördeki data/
+// alt klasörüne düşer (data/.htaccess dışarıdan erişimi kapatır).
+const API_KEY = 'DEGISTIR_uzun_rastgele_anahtar';
+
+function db_file(): string {
+    $outside = dirname(__DIR__, 2) . '/bitirmeprj_data';
+    if ((is_dir($outside) || @mkdir($outside, 0700, true)) && is_writable($outside)) return $outside . '/bms.sqlite';
+    $local = __DIR__ . '/data';
+    if (!is_dir($local)) @mkdir($local, 0700, true);
+    if (!file_exists($local . '/.htaccess')) @file_put_contents($local . '/.htaccess', "Require all denied\n");
+    return $local . '/bms.sqlite';
+}
 
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
-        $pdo = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
-                       DB_USER, DB_PASS,
+        $pdo = new PDO('sqlite:' . db_file(), null, null,
                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;');
+        $pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));     // CREATE TABLE IF NOT EXISTS
     }
     return $pdo;
 }

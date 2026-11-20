@@ -2,6 +2,7 @@
 // GET ?q=live&since=<id>   → son telemetri (en fazla 600 satır)
 // GET ?q=runs              → senaryo listesi
 // GET ?q=run&id=<run_id>   → tek senaryonun tüm verisi + olaylar
+// GET ?q=ping              → sunucu kontrolü (SQLite sürümü, satır sayısı)
 require __DIR__ . '/config.php';
 $pdo = db();
 $q = $_GET['q'] ?? 'live';
@@ -20,8 +21,8 @@ if ($q === 'live') {
 }
 
 if ($q === 'runs') {
-    out($pdo->query('SELECT r.*, TIMESTAMPDIFF(SECOND, started_at, ended_at) AS dur_s
-                     FROM runs r ORDER BY started_at DESC LIMIT 200')->fetchAll());
+    out($pdo->query("SELECT r.*, CAST(strftime('%s', ended_at) - strftime('%s', started_at) AS INTEGER) AS dur_s
+                     FROM runs r ORDER BY started_at DESC, run_id DESC LIMIT 200")->fetchAll());
 }
 
 if ($q === 'run') {
@@ -31,6 +32,12 @@ if ($q === 'run') {
     $se = $pdo->prepare('SELECT t_ms,code,detail FROM events WHERE run_id=? ORDER BY t_ms');
     $se->execute([$id]);
     out(['rows' => $st->fetchAll(), 'events' => $se->fetchAll()]);
+}
+
+if ($q === 'ping') {
+    out(['ok' => true, 'sqlite' => $pdo->query('SELECT sqlite_version()')->fetchColumn(),
+         'telemetry' => (int)$pdo->query('SELECT COUNT(*) FROM telemetry')->fetchColumn(),
+         'outside_webroot' => strpos(db_file(), __DIR__) !== 0]);
 }
 
 out(['error' => 'bad q'], 400);
