@@ -118,8 +118,34 @@ uint32_t bsp_uart_write_async(const uint8_t *buf, uint32_t n)
 }
 uint32_t bsp_uart_tx_drops(void) { return txq_drop; }
 
+/* Kesmeli alım: 256 B halka tampon (komut satırları kısa; dolarsa yeni bayt atılır) */
+#define RXQ_N 256u
+static volatile uint8_t  rxq[RXQ_N];
+static volatile uint32_t rxq_h, rxq_t;
+
+void bsp_uart_rx_enable(void)
+{
+    rxq_h = rxq_t = 0;
+    LPUART1->ICR = USART_ICR_ORECF;
+    LPUART1->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+}
+
+int bsp_uart_getc(uint8_t *c)
+{
+    if (rxq_t == rxq_h) return 0;
+    *c = rxq[rxq_t];
+    rxq_t = (rxq_t + 1u) % RXQ_N;
+    return 1;
+}
+
 void LPUART_IRQHandler(void)                                  /* vektör adı başlangıç dosyasındaki gibi */
 {
+    if (LPUART1->ISR & USART_ISR_ORE) LPUART1->ICR = USART_ICR_ORECF;     /* taşma: bayrağı sil */
+    if ((LPUART1->CR1 & USART_CR1_RXNEIE_RXFNEIE) && (LPUART1->ISR & USART_ISR_RXNE_RXFNE)) {
+        const uint8_t b = (uint8_t)LPUART1->RDR;
+        const uint32_t next = (rxq_h + 1u) % RXQ_N;
+        if (next != rxq_t) { rxq[rxq_h] = b;  rxq_h = next; }
+    }
     if ((LPUART1->CR1 & USART_CR1_TXEIE_TXFNFIE) && (LPUART1->ISR & USART_ISR_TXE_TXFNF)) {
         if (txq_t != txq_h) { LPUART1->TDR = txq[txq_t];  txq_t = (txq_t + 1u) % TXQ_N; }
         else LPUART1->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;

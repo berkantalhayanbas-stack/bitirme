@@ -23,6 +23,10 @@ void     bsp_uart_write(const uint8_t *buf, uint32_t n);
 uint32_t bsp_uart_write_async(const uint8_t *buf, uint32_t n);
 uint32_t bsp_uart_tx_drops(void);
 void     bsp_uart_read(uint8_t *buf, uint32_t n);  /* n bayt gelene kadar bekler */
+/* Kesmeli alım (komut satırları, APP_MC): açıldıktan sonra RXNE kesmesi baytları 256 B halka
+ * tampona yazar; bsp_uart_read ile birlikte kullanma. getc: bayt varsa 1 döner. */
+void     bsp_uart_rx_enable(void);
+int      bsp_uart_getc(uint8_t *c);
 void     bsp_reset(void);                         /* yazılımla sistem sıfırlaması (geri dönmez) */
 
 #endif

@@ -4,6 +4,7 @@ r"""Kart üstü Monte Carlo (APP_MC) + aynı kodun PC (SIL) sürümü: koştur, 
     python tools/mc_run.py --n 1000 --pc-only           # yalnız PC
     python tools/mc_run.py --n 1000 --stm-log build\mc_stm.txt   # kayıtlı kart çıktısıyla karşılaştır
 Çıktılar (İngilizce): C:\bitirme\results\mc_runs.csv, mc_summary.txt, mc_overview.png
+(--n < 100 kısa deneme: build\mc\ altına, tez sonuçlarının üzerine yazmaz)
 Bitince ECU varsayılan görüntüsünü geri yükle (CLAUDE.md): fw_build.py --app 4 ... --crc-ref --flash
 """
 import argparse
@@ -28,6 +29,8 @@ ap.add_argument("--port", default="COM9")
 ap.add_argument("--pc-only", action="store_true")
 ap.add_argument("--stm-log", help="kart çıktısı kaydı (yeniden koşturmadan karşılaştır)")
 a = ap.parse_args()
+if a.n < 100:          # kısa deneme tez sonuçlarının üzerine yazmasın
+    RES = os.path.join(ROOT, "build", "mc")
 
 
 def gcc():
@@ -54,7 +57,7 @@ def run_pc():
 def run_stm():
     import serial
     subprocess.run([sys.executable, os.path.join(ROOT, "tools", "fw_build.py"), "--app", "8",
-                    "--define", f"MC_N={a.n}", "--define", f"MC_SEED={a.seed}", "--flash"], check=True)
+                    "--define", f"MC_N={a.n}", "--define", f"MC_SEED={a.seed}", "--define", "MC_TRACE_EVERY=0", "--flash"], check=True)
     cli = glob.glob(r"C:\ST\STM32CubeIDE_2.2.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools."
                     r"cubeprogrammer.win32_*\tools\bin\STM32_Programmer_CLI.exe")[0]
     s = serial.Serial(a.port, 115200, timeout=2)

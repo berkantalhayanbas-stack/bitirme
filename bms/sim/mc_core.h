@@ -16,6 +16,7 @@
 #ifndef MC_CORE_H
 #define MC_CORE_H
 #include <stdint.h>
+#include "bms_algo.h"
 
 #define MC_STEPS   6000u        /* 600 s, Ts = 0,1 s */
 enum { MC_F_NONE, MC_F_COOL, MC_F_HEAT, MC_F_NTC, MC_F_OFFSET, MC_F_N };
@@ -35,6 +36,10 @@ typedef struct {
     int32_t  t_limp, t_safe, t_cool, t_sens;   /* ilk LIMP / SAFE / soğutma alarmı / sensör nedeni [ms], -1 yok */
     const char *why;                     /* FAIL nedeni (PASS'te "-") */
 } mc_res_t;
+
+/* isteğe bağlı iz kancası: boş değilse her 1 s'lik benzetim zamanında çağrılır (kart: D satırı) */
+typedef void (*mc_trace_fn)(const mc_cfg_t *c, uint32_t t_ms, const bms_out_t *o);
+extern mc_trace_fn mc_trace;
 
 void        mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c);
 void        mc_run(const mc_cfg_t *c, mc_res_t *r);

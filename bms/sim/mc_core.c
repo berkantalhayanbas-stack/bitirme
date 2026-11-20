@@ -52,6 +52,7 @@ void mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c)
 /* ---------------------------------------------------------------- tek koşu */
 static twin_t tw;
 static bms_t  bms;
+mc_trace_fn mc_trace = 0;
 
 static float cycle_i(float t_s, uint32_t off)
 {
@@ -102,6 +103,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
         /* ---- ECU */
         bms_step(&bms, &in, &o);
         i_dis = o.dec.i_allow_dis;  i_chg = o.dec.i_allow_chg;
+        if (mc_trace && k % 10u == 9u) mc_trace(c, (uint32_t)t_ms + 100u, &o);
         /* ---- kayıt */
         if (tw.soc_min < r->min_soc) r->min_soc = tw.soc_min;
         if (tw.tc > r->max_tc) r->max_tc = tw.tc;

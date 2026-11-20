@@ -63,7 +63,9 @@
 #define OUT_HIGH_MIN    0.70f                /* I_allow/I_nom bunun altında: uzun far kapalı */
 #endif
 #ifndef BMS_TELEMETRY
-#define BMS_TELEMETRY 0                      /* 1: her adımda "D,..." telemetri satırı (adım 9, tools/live_panel.py) */
+#define BMS_TELEMETRY 0                      /* 1: her adımda gateway "D,..." satırı + "E,..." olaylar
+                                                (tools/web/gateway.py); 2: ayrıca geniş "DX,..." satırı
+                                                (tools/live_panel.py) */
 #endif
 
 #define SOC0_EKF  0.5f                      /* EKF başlangıç SOC'si (PIL ile aynı) */
@@ -174,6 +176,44 @@ static void apply_outputs(uint8_t state, float i_allow_dis)
         out_k = 1u;
     }
     bsp_out_set(out_low, out_high, out_k);
+}
+#endif
+
+#if BMS_TELEMETRY
+/* ---------------------------------------------------------------- olaylar (E satırı, gateway)
+ * E,<t_ms>,0,<code>,<detail>: açılış, durum geçişi, neden bitinin yükselmesi, CAN kaybı, kontaktör.
+ * Yalnız değişimde yazılır (10 Hz satırın yanında birkaç bayt). */
+static const char *const ST_CODE[5] = { "-", "NORMAL", "DERATE", "LIMP_HOME", "SAFE_STOP" };
+static const char *const CAUSE_CODE[7] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
+                                           "SOP_CHARGE", "DATASHEET_T_LIMIT", "SENSOR_FAULT", "SOC_EMPTY" };
+static void ev(uint32_t t_ms, const char *code)
+{
+    put_s("E,");  put_u(t_ms);  put_s(",0,");  put_s(code);  put_s(",");
+}
+static void events(uint32_t t_ms, uint8_t state, uint16_t cause, float tc, uint8_t can_ok)
+{
+    static uint8_t first = 1, st_prev, can_prev = 1, k_prev;
+    static uint16_t cause_prev;
+    if (first) {
+        ev(t_ms, "BOOT");  put_s(boot_reason[0] ? boot_reason + 1 : "power-on");  put_s("\r\n");
+        st_prev = 0;  cause_prev = 0;  first = 0;
+    }
+    if (state != st_prev) {
+        ev(t_ms, state <= 4u ? ST_CODE[state] : "?");
+        put_s("from=");  put_s(st_prev <= 4u ? ST_CODE[st_prev] : "?");
+        kv(" cause=", cause);  kf(" Tc=", tc);  put_s("\r\n");
+    }
+    const uint16_t up = (uint16_t)(cause & ~cause_prev);
+    for (int b = 0; b < 7; b++)
+        if (up & (1u << b)) { ev(t_ms, CAUSE_CODE[b]);  kf("Tc=", tc);  put_s("\r\n"); }
+    if (can_prev && !can_ok) { ev(t_ms, "CAN_TIMEOUT");  put_s("measurement frames lost\r\n"); }
+#if BMS_OUTPUTS
+    if (out_k != k_prev) { ev(t_ms, out_k ? "CONTACTOR_CLOSE" : "CONTACTOR_OPEN");  put_s("-\r\n"); }
+    k_prev = out_k;
+#else
+    (void)k_prev;
+#endif
+    st_prev = state;  cause_prev = cause;  can_prev = can_ok;
 }
 #endif
 
@@ -379,10 +419,24 @@ void ecu_run(void)
                 else tx_busy++;
             }
 #if BMS_TELEMETRY
-            /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
-             * CAN Rx FIFO'su boş). D,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax */
+            /* gateway satırı (tools/web/gateway.py, sunucu şeması): canlı modda run = 0; T = çekirdek
+             * kestirimi; durum 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP */
             if (send_ctrl) {
-                put_s("D,");  put_u(now_ms);  put_s(",");  put_u(out.dec.state);  put_s(",");  put_u(out.dec.cause);
+                bsp_can_err_t ce;
+                bsp_can_errors(&ce);
+                put_s("D,");  put_u(now_ms);  put_s(",0");
+                put_fix(100.0f * out.soc, 1);  put_fix(100.0f * soh, 1);  put_fix(out.tc, 1);
+                put_fix(out.dec.i_allow_dis, 1);
+                put_s(",");  put_u(out.dec.state);  put_s(",");  put_u(ce.tec);  put_s(",");  put_u(ce.rec);
+                put_s("\r\n");
+                events(now_ms, out.dec.state, out.dec.cause, out.tc, can_ok);
+            }
+#endif
+#if BMS_TELEMETRY >= 2
+            /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
+             * CAN Rx FIFO'su boş). DX,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax */
+            if (send_ctrl) {
+                put_s("DX,");  put_u(now_ms);  put_s(",");  put_u(out.dec.state);  put_s(",");  put_u(out.dec.cause);
                 put_fix(100.0f * out.soc, 2);  put_fix(out.tc, 2);  put_fix(out.ts, 2);
                 put_fix(out.dec.i_allow_dis, 1);  put_fix(out.dec.i_allow_chg, 1);  put_fix(out.dec.psi, 3);
                 put_fix(100.0f * soh, 1);

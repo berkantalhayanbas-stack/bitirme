@@ -1,13 +1,13 @@
 """
-Adım 9: canlı izleme paneli. ECU (APP_ECU, -DBMS_TELEMETRY=1) her adımda UART'a şu satırı yazar:
-  D,ms,state,cause,soc_pct,tc,ts,i_allow_dis,i_allow_chg,psi,soh_pct,I,V,T,V_min,V_max
+Adım 9: canlı izleme paneli. ECU (APP_ECU, -DBMS_TELEMETRY=2) her adımda UART'a şu satırı yazar:
+  DX,ms,state,cause,soc_pct,tc,ts,i_allow_dis,i_allow_chg,psi,soh_pct,I,V,T,V_min,V_max
 Panel bu satırları okur, CSV'ye kaydeder ve canlı çizer: SOC, sıcaklıklar (Tc tahmini, Ts tahmini,
 ölçülen T), akım (ölçülen I, +I_allow_dis, -I_allow_chg), hücre gerilimleri (V_min / V_max; adım 8'de
 19 grup), durum (NORMAL / DERATE / LIMP / SAFE). Diğer satırlar (1 s'lik rapor, komut cevapları)
 konsola yazılır.
 
 Kullanım:
-  python tools/fw_build.py --app 4 --define BMS_TELEMETRY=1 --flash
+  python tools/fw_build.py --app 4 --define BMS_TELEMETRY=2 --flash
   python tools/live_panel.py --port COM9                       # canlı pencere + build/live/<zaman>.csv
   python tools/live_panel.py --port COM9 --duration 60 --png p.png --no-gui   # pencere yok, sonda PNG
 """
@@ -47,8 +47,8 @@ class Reader(threading.Thread):
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 line = line.decode(errors="replace").strip()
-                if line.startswith("D,"):
-                    p = line[2:].split(",")
+                if line.startswith("DX,"):
+                    p = line[3:].split(",")
                     if len(p) != len(COLS):
                         continue
                     try:

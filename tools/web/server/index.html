@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EV BMS — Live Telemetry & Scenario Test Center</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --fg:#e6e8eb; --mut:#8a93a3; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 18px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; font-weight:600; }
+  #conn { font-size:12px; color:var(--mut); }
+  .grid { display:grid; gap:12px; padding:0 18px 18px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+  .card { background:var(--card); border-radius:10px; padding:14px; }
+  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .kpi b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
+  .kpi span { font-size:12px; color:var(--mut); }
+  .state { display:inline-block; padding:6px 12px; border-radius:6px; font-weight:700; }
+  .s0 { background:#3a3f4b; } .s1 { background:var(--ok); color:#000; } .s2 { background:var(--warn); color:#000; }
+  .s3 { background:#e67e22; color:#000; } .s4 { background:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #262a33; }
+  tr.click { cursor:pointer; } tr.click:hover { background:#20242d; }
+  .PASS { color:var(--ok); } .FAIL { color:var(--bad); } .RUNNING { color:var(--warn); }
+  h2 { font-size:14px; margin:0 0 10px; color:var(--mut); font-weight:600; }
+  canvas { max-height:240px; }
+  ul { margin:0; padding-left:18px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>EV BMS — Live Telemetry</h1>
+  <span id="state" class="state s0">—</span>
+  <span id="conn">connecting…</span>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>Live values</h2>
+    <div class="kpis">
+      <div class="kpi"><b id="k_soc">—</b><span>SOC (%)</span></div>
+      <div class="kpi"><b id="k_soh">—</b><span>SOH (%)</span></div>
+      <div class="kpi"><b id="k_T">—</b><span>Core temp. est. (°C)</span></div>
+      <div class="kpi"><b id="k_I">—</b><span>I_allow (A)</span></div>
+      <div class="kpi"><b id="k_tec">—</b><span>CAN TEC / REC</span></div>
+      <div class="kpi"><b id="k_run">—</b><span>Run ID</span></div>
+    </div>
+  </div>
+  <div class="card"><h2>SOC & SOH (%)</h2><canvas id="c1"></canvas></div>
+  <div class="card"><h2>Core temperature est. (°C) &amp; I_allow (A)</h2><canvas id="c2"></canvas></div>
+  <div class="card"><h2>Recent events</h2><ul id="events"></ul></div>
+  <div class="card" style="grid-column:1/-1">
+    <h2>Scenario test center</h2>
+    <div id="sum" style="font-size:13px;margin-bottom:8px;color:var(--mut)"></div>
+    <table><thead><tr><th>ID</th><th>Scenario</th><th>Result</th><th>Duration (s)</th><th>Summary</th></tr></thead>
+    <tbody id="runs"></tbody></table>
+  </div>
+  <div class="card" style="grid-column:1/-1;display:none" id="detail">
+    <h2 id="dtitle">Run</h2><canvas id="c3"></canvas>
+  </div>
+</div>
+
+<script>
+// ECU durum kodları (bms_algo.h): 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP
+const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
+// cihazdan gelen metin (olay ayrıntısı, senaryo adı) HTML olarak yorumlanmasın
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const MAXP = 600;
+let lastId = 0;
+const opt = { animation:false, responsive:true, plugins:{ legend:{ labels:{ color:'#e6e8eb' } } },
+  scales:{ x:{ ticks:{ color:'#8a93a3', maxTicksLimit:6 } }, y:{ ticks:{ color:'#8a93a3' } }, y2:{ position:'right', ticks:{ color:'#8a93a3' }, grid:{ display:false } } },
+  elements:{ point:{ radius:0 } } };
+const mk = (id, ds) => new Chart(document.getElementById(id), { type:'line', data:{ labels:[], datasets:ds }, options:opt });
+const c1 = mk('c1', [{ label:'SOC', data:[], borderColor:'#3498db' }, { label:'SOH', data:[], borderColor:'#9b59b6' }]);
+const c2 = mk('c2', [{ label:'T', data:[], borderColor:'#e67e22' }, { label:'I_allow', data:[], borderColor:'#1abc9c', yAxisID:'y2' }]);
+const c3 = mk('c3', [{ label:'SOC', data:[], borderColor:'#3498db' }, { label:'T', data:[], borderColor:'#e67e22' },
+                     { label:'I_allow', data:[], borderColor:'#1abc9c', yAxisID:'y2' }, { label:'State', data:[], borderColor:'#e74c3c', stepped:true, yAxisID:'y2' }]);
+const $ = id => document.getElementById(id);
+const f = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
+
+function push(ch, label, vals) {
+  ch.data.labels.push(label);
+  vals.forEach((v, i) => ch.data.datasets[i].data.push(v));
+  if (ch.data.labels.length > MAXP) { ch.data.labels.shift(); ch.data.datasets.forEach(d => d.data.shift()); }
+}
+
+async function live() {
+  try {
+    const r = await fetch(`data.php?q=live&since=${lastId}`);
+    const j = await r.json();
+    for (const x of j.rows) {
+      const lbl = (x.t_ms / 1000).toFixed(1);
+      push(c1, lbl, [x.soc, x.soh]);
+      push(c2, lbl, [x.temp, x.i_allow]);
+      lastId = Math.max(lastId, +x.id);
+    }
+    if (j.rows.length) {
+      c1.update(); c2.update();
+      const x = j.rows[j.rows.length - 1];
+      $('k_soc').textContent = f(x.soc); $('k_soh').textContent = f(x.soh);
+      $('k_T').textContent = f(x.temp); $('k_I').textContent = f(x.i_allow);
+      $('k_tec').textContent = `${x.tec}/${x.rec}`; $('k_run').textContent = x.run_id;
+      $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `state s${x.state}`;
+      $('conn').textContent = `last packet ${x.rx_at}`;
+    }
+    $('events').innerHTML = j.events.map(e => `<li>[run ${esc(e.run_id)}, ${(e.t_ms/1000).toFixed(1)} s] <b>${esc(e.code)}</b> ${esc(e.detail)}</li>`).join('');
+  } catch (e) { $('conn').textContent = 'connection error'; }
+}
+
+async function runs() {
+  try {
+    const j = await (await fetch('data.php?q=runs')).json();
+    const p = j.filter(r => r.result === 'PASS').length, fl = j.filter(r => r.result === 'FAIL').length;
+    $('sum').textContent = `${j.length} runs — ${p} PASS, ${fl} FAIL` + (p + fl ? ` (pass rate ${(100 * p / (p + fl)).toFixed(1)} %)` : '');
+    $('runs').innerHTML = j.map(r => `<tr class="click" data-id="${esc(r.run_id)}" data-name="${esc(r.name)}">
+      <td>${esc(r.run_id)}</td><td>${esc(r.name)}</td><td class="${esc(r.result)}">${esc(r.result)}</td><td>${esc(r.dur_s ?? '—')}</td><td>${esc(r.summary)}</td></tr>`).join('');
+  } catch (e) {}
+}
+
+async function detail(id, name) {
+  const j = await (await fetch(`data.php?q=run&id=${id}`)).json();
+  c3.data.labels = j.rows.map(x => (x.t_ms / 1000).toFixed(1));
+  c3.data.datasets[0].data = j.rows.map(x => x.soc);
+  c3.data.datasets[1].data = j.rows.map(x => x.temp);
+  c3.data.datasets[2].data = j.rows.map(x => x.i_allow);
+  c3.data.datasets[3].data = j.rows.map(x => x.state * 10);
+  c3.update();
+  $('dtitle').textContent = `Run ${id} — ${name} (state ×10 on right axis)`;
+  $('detail').style.display = '';
+}
+
+$('runs').addEventListener('click', ev => {
+  const tr = ev.target.closest('tr[data-id]');
+  if (tr) detail(+tr.dataset.id, tr.dataset.name);
+});
+live(); runs();
+setInterval(live, 1000);
+setInterval(runs, 5000);
+</script>
+</body>
+</html>
