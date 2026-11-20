@@ -23,7 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CUBE = r"C:\ST\STM32CubeIDE_*\STM32CubeIDE\plugins"
 ARCH = ["-mcpu=cortex-m4", "-mfpu=fpv4-sp-d16", "-mfloat-abi=hard", "-mthumb"]
-INCS = ["Inc", "Drivers/CMSIS/Device", "Drivers/CMSIS/Core", "bms/bsp", "bms/common", "bms/pil"]
+INCS = ["Inc", "Drivers/CMSIS/Device", "Drivers/CMSIS/Core", "bms/bsp", "bms/common", "bms/pil", "bms/sim"]
 DEFS = ["-DDEBUG", "-DSTM32", "-DSTM32G4", "-DNUCLEO_G431RB", "-DSTM32G431RBTx", "-DSTM32G431xx"]
 
 

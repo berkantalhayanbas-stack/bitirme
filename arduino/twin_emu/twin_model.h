@@ -1,4 +1,5 @@
 /* twin_model.h -- 19S12P paket elektro-termal ikizinin C portu (C:\bitirme\twin\battery_model.py).
+ * Ana kopya bms/sim/ (STM32 Monte Carlo, APP_MC); arduino/twin_emu/twin_model.* bunun BİREBİR kopyası.
  *
  * Elektriksel: hücre başına 2-RC Thevenin, R0(T, SOC) Arrhenius + düşük SOC artışı, OCV(SOC) tablosu
  * Termal     : 2 düğümlü (çekirdek-yüzey) toplu model, Bernardi tersinmez ısı, açık Euler
@@ -31,6 +32,7 @@ typedef struct {
     float tc, ts;               /* ortalama hücre çekirdek / yüzey sıcaklığı [°C] */
     float t_amb;                /* ortam [°C], her adımdan önce dışarıdan yazılabilir */
     float ru_k;                 /* soğutma direnci çarpanı (1 = sağlam; soğutma arızası 4, twin cooling_fault) */
+    float kq, kr;               /* paket kapasite / direnç çarpanı (1 = nominal; Monte Carlo hücre sapması) */
     float a1, a2, dt;           /* RC ayrıklaştırma katsayıları (ZOH) */
     float v_pack, v_min, v_max; /* çıktı: paket gerilimi, en düşük / en yüksek grup gerilimi */
     float soc_avg;              /* çıktı: grup SOC ortalaması */
