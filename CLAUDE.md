@@ -30,7 +30,7 @@ STM32CubeIDE projesi, **HAL yok**: çevre birimlerine doğrudan register seviyes
 ## Kodlama kuralları
 - C, float32 (`f` sonekli sabitler; `double` kullanma — FPU yalnız tek hassasiyet).
 - Dinamik bellek yok, `printf` yok. Modül deseni: durum `struct` + `*_init` + `*_step`.
-- Yorumlar ve açıklamalar **Türkçe**; mevcut stili (kısa blok yorum başlıkları) koru.
+- Kod yorumları ve açıklamalar **Türkçe**; mevcut stili (kısa blok yorum başlıkları) koru. Geri kalan her şey **İngilizce** (tez dili): figürler, tablo/CSV başlıkları, log ve rapor satırları, UART telemetri. Tez figürleri ve sonuç tabloları tek klasörde: `C:\bitirme\results\` (eski `sonuçlar/` ve `simulink/sonuclar/` buraya taşındı, 2026-11-20); `build/` yalnız yeniden üretilebilir ara çıktı.
 - Protokol/çerçeve düzeni (bayt ofsetleri, CRC kapsamı) değişirse dosya başındaki yorumu ve PC tarafı scripti de güncellenmeli.
 - Zamanlama kritik: `bms_step` süresi DWT ile ölçülüyor (`app_pil.c`); döngü içine ağır iş ekleme.
 
