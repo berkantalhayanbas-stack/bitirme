@@ -57,9 +57,11 @@ void bsp_out_set(float duty_low, float duty_high, uint8_t contactor)
 #endif
 }
 
-void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m)
+void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m, void (*poll)(void))
 {
     const uint32_t t0 = bsp_cycles(), len = window_us * (BSP_CPU_HZ / 1000000u);
+    const uint32_t poll_cyc = 200u * (BSP_CPU_HZ / 1000000u);
+    uint32_t t_poll = t0;
     uint32_t n = 0, hi8 = 0, hi9 = 0, r8 = 0, r9 = 0, prev = GPIOA->IDR;
     uint32_t a8 = 0, b8 = 0, a9 = 0, b9 = 0;     /* ilk / son yükselen kenarın DWT zamanı */
     while (bsp_cycles() - t0 < len) {
@@ -70,6 +72,7 @@ void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m)
         if (rise & (1u << 8)) { if (!r8++) a8 = now; b8 = now; }
         if (rise & (1u << 9)) { if (!r9++) a9 = now; b9 = now; }
         prev = v;
+        if (poll && now - t_poll >= poll_cyc) { t_poll = now;  poll(); }   /* kısa: örnekleme birkaç µs kayar */
     }
     m->d_low  = (float)hi8 / (float)n;
     m->d_high = (float)hi9 / (float)n;

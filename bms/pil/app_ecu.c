@@ -105,6 +105,28 @@ static uint32_t cells_fb(void)
 }
 static const char *boot_reason = "";
 
+/* CAN alım ara deposu: uzun bir iş (çıkış ölçümü, 20 ms) sürerken donanım FIFO'su (3 çerçeve)
+ * buraya boşaltılır; ana döngü önce buradan, sonra donanımdan okur (sıra korunur). */
+#define RXS_N 16u
+static struct { uint16_t id; uint8_t len, d[8]; } rxs[RXS_N];
+static uint32_t rxs_h, rxs_t, rxs_drop;
+static void can_stash(void)
+{
+    uint16_t id;  uint8_t d[8], len;
+    while (((rxs_h + 1u) % RXS_N) != rxs_t && bsp_can_recv(&id, d, &len)) {
+        rxs[rxs_h].id = id;  rxs[rxs_h].len = len;  memcpy(rxs[rxs_h].d, d, 8);
+        rxs_h = (rxs_h + 1u) % RXS_N;
+    }
+    if (((rxs_h + 1u) % RXS_N) == rxs_t) rxs_drop++;          /* dolu (olmamalı) */
+}
+static int can_get(uint16_t *id, uint8_t *d, uint8_t *len)
+{
+    if (rxs_t == rxs_h) return bsp_can_recv(id, d, len);
+    *id = rxs[rxs_t].id;  *len = rxs[rxs_t].len;  memcpy(d, rxs[rxs_t].d, 8);
+    rxs_t = (rxs_t + 1u) % RXS_N;
+    return 1;
+}
+
 /* ---------------------------------------------------------------- metin çıktısı (printf yok) */
 /* kesmeli (bloklamayan): rapor yazılırken CAN alımı durmasın */
 static void put_s(const char *s) { (void)bsp_uart_write_async((const uint8_t *)s, (uint32_t)strlen(s)); }
@@ -329,7 +351,7 @@ void ecu_run(void)
         /* ---- her 1 ms: alım ---- */
         {
             uint16_t id;  uint8_t d[8], len, c;
-            while (bsp_can_recv(&id, d, &len)) {
+            while (can_get(&id, d, &len)) {
                 if (len != 8) { other++; continue; }
                 if (id == CAN_ID_EMU_MEAS1) {
                     can_meas1_t a;
@@ -496,10 +518,11 @@ void ecu_run(void)
             put_s(e.bo ? " BUS-OFF" : e.ep ? " PASSIVE" : e.ew ? " WARN" : " ACTIVE");
             kv(" bo#", e.n_busoff); kv(" lost#", e.n_rx_lost);
             if (bsp_uart_tx_drops()) kv(" uart_drop ", bsp_uart_tx_drops());
+            if (rxs_drop) kv(" rxs_drop ", rxs_drop);
 #if BMS_OUTPUTS
             {   /* pin seviyesinde doğrulama (20 ms örnekleme): set edilen ve ölçülen */
                 bsp_out_meas_t om;
-                bsp_out_measure(20000u, &om);
+                bsp_out_measure(20000u, &om, can_stash);
                 kf(" | OUT low set ", 100.0f * out_low);  kf("% meas ", 100.0f * om.d_low);
                 kv("% ", om.f_low_hz);  kf("Hz | high set ", 100.0f * out_high);
                 kf("% meas ", 100.0f * om.d_high);  kv("% ", om.f_high_hz);

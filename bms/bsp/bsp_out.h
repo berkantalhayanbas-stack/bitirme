@@ -32,6 +32,8 @@ void bsp_out_set(float duty_low, float duty_high, uint8_t contactor);   /* duty 
  * pin seviyesini verir); frekans (yükselen kenar sayısı) ve doluluk; kontaktör komutu (ODR'den,
  * 1 = çekili) ve PB5'in gerçek pin seviyesi (IDR; açık-akaçlıda bırakınca modül 1'e çeker). */
 typedef struct { uint32_t f_low_hz, f_high_hz; float d_low, d_high; uint8_t contactor, k_pin; } bsp_out_meas_t;
-void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m);
+/* poll (NULL olabilir): ölçüm sürerken ~200 µs'de bir çağrılır. 20 ms boyunca CAN Rx FIFO'su (3
+ * çerçeve) boşaltılmazsa taşıyordu (saniyede 1 kayıp hücre çerçevesi, lost#). */
+void bsp_out_measure(uint32_t window_us, bsp_out_meas_t *m, void (*poll)(void));
 
 #endif
