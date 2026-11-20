@@ -14,10 +14,16 @@ typedef struct {
     float P[EKF_N][EKF_N];
     float r0_ref, r1, r2, a1, a2, q_ah;
     int   n_rej;
+    int   n_zero;        /* açılış sıfır akım kalibrasyonu (A9) */
+    float i0_sum;
 } ekf_t;
 void  ekf_init(ekf_t *e, float soc0, float q_scale, float r_scale);
 /* T_use: R0(T) düzeltmesi için sıcaklık; rejected: inovasyon kapısı ölçümü reddetti */
 void  ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, uint8_t *rejected);
+/* ilk DEC_N_ZERO adımda (karar I_allow = 0 tutar) ölçülen akımı toplar, sonunda kayma durumunu
+ * ortalamayla başlatır (büyükse karar ayrıca LIMP verir; bilinen ofset yine telafi edilir).
+ * ekf_step'ten sonra çağrılır. */
+void  ekf_zero(ekf_t *e, float i_meas);
 
 /* ------------------------------------------------------------ sıcaklık gözlemcisi */
 typedef struct {
@@ -54,6 +60,9 @@ typedef struct {
     uint8_t state, therm_on, cool_on, f_ds, f_sop_dis, f_sop_chg;
     int   n_ok, n_lo, n_hi, n_run;   /* n_run: açılıştan beri örnek (soğutma alarmı beklemesi) */
     int   n_hl, n_hs;                /* ölçüme bağlı çekirdek sınırı: LIMP / SAFE süre sayaçları */
+    int   n_zero;                    /* açılış sıfır akım kontrolü (A9): örnek sayısı */
+    float i0_sum;
+    uint8_t i0_ok, zero_bad;
     float i_dis, i_chg;
 } decision_t;
 typedef struct {

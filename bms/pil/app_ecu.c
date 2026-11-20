@@ -156,6 +156,7 @@ static const char *state_name(uint8_t s)
  * Kısa far duty = I_allow_dis / I_nom (alt sınır %25); oran < %70 -> uzun far kapalı, değilse aynı duty.
  * Kontaktör: NORMAL / DERATE / LIMP-HOME'da kapalı (röle çekili), SAFE-STOP'ta açık; SAFE'te tüm
  * farlar sönük. Ölçüm gelmeden (açılış) her şey kapalı. CAN kesilirse izleyici SAFE'e geçirir.
+ * Açılış sıfır akım kontrolü (A9, ilk 1 s): kontaktör açık (akım kesin 0), farlar sönük.
  * Gama: göz parlaklığı doğrusal algılamaz (%25 duty ile %100 arası az fark edilir); yukarıdaki oran
  * "algılanan parlaklık" seviyesidir, PWM duty = seviye^2,5 (%25 -> %3,1, %50 -> %17,7, %100 -> %100). */
 static float out_low, out_high;              /* PWM duty (gama sonrası) */
@@ -163,7 +164,7 @@ static uint8_t out_k;
 static float gamma_duty(float l) { return l * l * sqrtf(l); }      /* l^2,5 */
 static void apply_outputs(uint8_t state, float i_allow_dis)
 {
-    if (state == ST_SAFE || state == 0u) {
+    if (state == ST_SAFE || state == 0u || bms.dec.n_zero < DEC_N_ZERO) {
         out_low = 0.0f;  out_high = 0.0f;  out_k = 0u;
     } else {
         float r = i_allow_dis / OUT_I_NOM_DIS;

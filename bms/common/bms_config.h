@@ -37,6 +37,8 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define EKF_Q           { 1e-10f, 1e-6f, 1e-6f, 1e-8f, 1e-8f }
 #define EKF_KR_MIN      0.5f        /* k_R = gerçek R0 / nominal R0 sınırları */
 #define EKF_KR_MAX      2.0f
+#define EKF_P_B0        0.05f       /* [A^2] sıfır akım kalibrasyonundan sonra kayma belirsizliği
+                                       (10 örnek ortalaması: si^2/10 ~ 0,025) */
 #define EKF_R           (0.25f * 0.25f)
 #define EKF_GATE        10.0f       /* normalize inovasyon kapısı [sigma] */
 #define EKF_N_REJ       5           /* art arda red sınırı -> kapı açılır */
@@ -95,6 +97,9 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_BIAS_MAX    8.0f        /* [A] 5 A: direnç uyumsuzluğunda sahte sensör LIMP'i (A3/A7) */
 #define DEC_N_EXIT      100         /* 10 s */
 #define DEC_RAMP_UP     10.0f       /* [A/s] */
+#define DEC_N_ZERO      10          /* 1 s: açılışta kontaktör açık, I_allow = 0 (A9 sıfır akım kontrolü) */
+#define DEC_ZERO_MAX    3.0f        /* [A] |ölçülen ortalama| üstü: akım sensörü arızası (LIMP);
+                                       altı: EKF kayma durumu bununla başlar (300 A sensörün %1'i) */
 /* veri sayfası sürekli akım sınırları [A/hücre], 2 °C geçişli parçalı doğrusal tablo */
 #define DEC_DS_N        6
 static const float DEC_T_DIS[DEC_DS_N] = { -20.f, -18.f, 8.f, 10.f, 53.f, 55.f };

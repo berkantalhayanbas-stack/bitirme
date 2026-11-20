@@ -252,10 +252,22 @@ float rint_step(rint_t *r, float i_meas, float v_meas, float Tc_hat, float soc_e
 }
 
 /* =================================================================== karar mekanizması */
+void ekf_zero(ekf_t *e, float i_meas)
+{
+    if (e->n_zero >= DEC_N_ZERO) return;
+    e->i0_sum += i_meas;
+    if (++e->n_zero == DEC_N_ZERO) {
+        e->x[3] = e->i0_sum / (float)DEC_N_ZERO;
+        for (int j = 0; j < EKF_N; j++) { e->P[3][j] = 0.0f;  e->P[j][3] = 0.0f; }
+        e->P[3][3] = EKF_P_B0;
+    }
+}
+
 void decision_init(decision_t *d)
 {
     memset(d, 0, sizeof(*d));
     d->state = ST_NORMAL;                    /* I_allow 0'dan rampa ile başlar */
+    d->i0_ok = 1;
 }
 
 static uint8_t band(uint8_t f, float ratio)
@@ -289,6 +301,15 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
         return;
     }
 
+    /* ---- açılış sıfır akım kontrolü (A9): kontaktör açık, akım kesin 0 -> ölçülen = ofset ---- */
+    const uint8_t zeroing = d->n_zero < DEC_N_ZERO;
+    if (zeroing) {                           /* geçersiz örnek varsa sonuç yok (I_valid zaten LIMP) */
+        d->i0_sum += I_meas;
+        d->i0_ok = d->i0_ok && I_valid;
+        if (++d->n_zero == DEC_N_ZERO)
+            d->zero_bad = d->i0_ok && fabsf(d->i0_sum / (float)DEC_N_ZERO) > DEC_ZERO_MAX;
+    }
+
     /* ---- veri sayfası sınırları ---- */
     const float i_ds_dis = interp_tab(DEC_T_DIS, DEC_I_DIS, DEC_DS_N, Ts_hat) * BMS_NP;
     const float i_ds_chg = interp_tab(DEC_T_CHG, DEC_I_CHG, DEC_DS_N, Ts_hat) * BMS_NP;
@@ -320,7 +341,7 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     float tgt_chg = maxf(0.f, minf(i_ds_chg * (1.f - psi), sop_chg));
 
     /* ---- LIMP-HOME ---- */
-    const uint8_t sensor_bad = !T_valid || !I_valid || fabsf(bias_est) > DEC_BIAS_MAX;
+    const uint8_t sensor_bad = !T_valid || !I_valid || fabsf(bias_est) > DEC_BIAS_MAX || d->zero_bad;
     const uint8_t empty = SOC_est < DEC_SOC_EMPTY;
     const uint8_t hot_ss = d->n_hl >= DEC_N_HARD;
     const uint8_t limp = sensor_bad || Tc_hat > DEC_T_LIMP || hot_ss || empty;
@@ -346,6 +367,7 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     const float step = DEC_RAMP_UP * BMS_TS;
     d->i_dis = (tgt_dis < d->i_dis) ? tgt_dis : minf(tgt_dis, d->i_dis + step);
     d->i_chg = (tgt_chg < d->i_chg) ? tgt_chg : minf(tgt_chg, d->i_chg + step);
+    if (zeroing) { d->i_dis = 0.0f;  d->i_chg = 0.0f; }
 
     o->state = d->state;  o->i_allow_dis = d->i_dis;  o->i_allow_chg = d->i_chg;
     o->psi = 1.f - d->i_dis / I_nom_dis;  o->cause = cause;
@@ -373,6 +395,7 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
     if (!b->th.started) thermal_start(&b->th, in->T);
     const float T_use = o->t_valid ? in->T : b->th.x[1];
     ekf_step(&b->ekf, in->I, in->V, T_use, &o->innov, &o->rejected);
+    ekf_zero(&b->ekf, in->I);
     o->soc = b->ekf.x[0];
     o->bias = b->ekf.x[3];
 

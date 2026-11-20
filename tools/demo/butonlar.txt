@@ -5,7 +5,7 @@
 === D3 Sogutma arizasi
 +1 m 0             ; Arac hazir surus cevrimini suruyor
 +0 k 1             ; D3: sogutma arizasi (ECU'ya haber verilmedi)
-bekle cause&2 300  ; ECU arizayi kendi kestiriminden buldu: izin %70 (acilistan >= 120 s sonra)
+bekle cause&2 700  ; ECU arizayi kendi kestiriminden buldu: izin %70 (>= 120 s; 25 C soguk pakette ~490 s)
 +10 k 1            ; D3: sogutma onarildi
 +0 !reset          ; (ECU yeniden baslatildi: alarm temizlendi)
 bekle state==1 30  ; ECU NORMAL
