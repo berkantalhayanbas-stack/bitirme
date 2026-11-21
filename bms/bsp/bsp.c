@@ -130,6 +130,12 @@ void bsp_uart_rx_enable(void)
     LPUART1->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
 }
 
+void bsp_uart_release(void)
+{
+    LPUART1->CR1 = 0;                                         /* LPUART kapalı */
+    GPIOA->MODER |= (3U << (2 * 2)) | (3U << (3 * 2));        /* PA2, PA3: analog = yüksek empedans */
+}
+
 int bsp_uart_getc(uint8_t *c)
 {
     if (rxq_t == rxq_h) return 0;

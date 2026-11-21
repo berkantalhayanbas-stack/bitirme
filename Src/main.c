@@ -10,6 +10,7 @@
  *   APP_CORDIC       CORDIC ile yazılım expf/logf karşılaştırması (döngü + hata), UART tablosu
  *   APP_LA           PA11 (CAN RX) lojik analizörü, TIM6 + DMA 4,25 MHz (PC: tools/la_view.py)
  *   APP_MC           kart üstü Monte Carlo: ikiz + bms_step hızlandırılmış toplu koşu (PC: tools/mc_run.py)
+ *   APP_PARK         PA2/PA3 serbest (ST-LINK sanal portu dışarıdaki cihaza açık: ESP-01 programlama)
  * APP_MODE derleme bayrağıyla da verilebilir: -DAPP_MODE=5
  */
 #include "bsp.h"
@@ -30,6 +31,7 @@
 #define APP_CORDIC        6
 #define APP_LA            7
 #define APP_MC            8
+#define APP_PARK          9
 #ifndef APP_MODE
 #define APP_MODE  APP_ECU
 #endif
@@ -51,6 +53,9 @@ int main(void)
     la_run();       /* geri dönmez */
 #elif APP_MODE == APP_MC
     mc_app_run();   /* geri dönmez */
+#elif APP_MODE == APP_PARK
+    bsp_uart_release();
+    for (;;) { bsp_led_toggle(); bsp_delay_ms(500); }   /* yavaş yanıp sönen LED: park */
 #else
     pil_run();      /* geri dönmez */
 #endif

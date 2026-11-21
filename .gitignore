@@ -25,3 +25,4 @@ build/
 # web: gizli bilgiler (sunucu parolası, API anahtarı) depoya girmez
 tools/web/server/config.php
 tools/web/api_key.txt
+arduino/esp_gateway/secrets.h

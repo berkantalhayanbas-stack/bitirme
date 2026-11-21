@@ -26,6 +26,9 @@ void     bsp_uart_read(uint8_t *buf, uint32_t n);  /* n bayt gelene kadar bekler
 /* Kesmeli alım (komut satırları, APP_MC): açıldıktan sonra RXNE kesmesi baytları 256 B halka
  * tampona yazar; bsp_uart_read ile birlikte kullanma. getc: bayt varsa 1 döner. */
 void     bsp_uart_rx_enable(void);
+/* PA2/PA3'ü analog (yüksek empedans) yapar: ST-LINK sanal portu başka bir cihazla (ESP-01
+ * programlama, APP_PARK) doğrudan konuşabilsin. */
+void     bsp_uart_release(void);
 int      bsp_uart_getc(uint8_t *c);
 void     bsp_reset(void);                         /* yazılımla sistem sıfırlaması (geri dönmez) */
 
