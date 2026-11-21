@@ -42,6 +42,7 @@ void mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c)
     c->t_fault = uni(60.0f, 480.0f);
     /* akım sensörü ofseti: normalde |b| <= 2,5 A (A9 telafi eder); arızada 4-12 A, rastgele işaret */
     c->bias    = uni(-2.5f, 2.5f);
+    c->soh     = 1.0f;
     if (c->fault == MC_F_OFFSET) {
         const float m = uni(4.0f, 12.0f);
         c->bias = urand() < 0.5f ? -m : m;
@@ -49,7 +50,7 @@ void mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c)
     /* yaşlanma (stres indeksi Ψ_H'nin doğrulaması): çekilişler sonda, diğer senaryolar değişmez */
     if (c->fault == MC_F_NONE && urand() < 0.4f) {
         c->fault = MC_F_AGED;
-        c->kr *= uni(1.4f, 1.7f);                 /* R0, R1, R2 birlikte */
+        c->soh = uni(0.70f, 0.84f);               /* Ψ_H 1,2'de (SOH ~%86) başlar, 1,3'te (%80) dolar */
     }
     rng_seed(c->seed ^ 0xA5A5A5A5u);              /* ölçüm gürültüsü ayrı akış */
 }
@@ -71,7 +72,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
 {
     const float dt = BMS_TS;
     twin_init(&tw, c->soc0, c->t_amb, dt);
-    tw.kq = c->kq;  tw.kr = c->kr;
+    tw.kq = c->kq;  tw.kr = c->kr;  tw.soh = c->soh;
     bms_init(&bms, 0.5f, 1.0f, 1.0f, 0.0f, 0.0f);   /* app_ecu ile aynı: EKF %50'den başlar */
     float i_dis = 0.0f, i_chg = 0.0f;
     r->min_soc = 2.0f;  r->max_tc = -99.0f;  r->soc_err = 0.0f;
@@ -136,8 +137,8 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     r->why = "-";
     uint8_t ok = 1;
     /* yaşlanmış pakette SOC hatası hükme girmez (soc_err alanında raporlanır): EKF yalnız R0 ölçeğini
-     * kestirir, R1/R2 artışı modellenmez (1000 koşuluk taramada %9,7'ye kadar). Bu koşuların sınadığı
-     * şey stres indeksinin Ψ_H kriteri. */
+     * kestirir; kapasite kaybı ve R1/R2 artışı modellenmez (SOH %70-84, 1000 koşu: ortalama %1,9,
+     * en çok %4,7; bilinen sınırlama). Bu koşuların sınadığı şey stres indeksinin Ψ_H kriteri. */
     if (c->fault != MC_F_AGED && r->soc_err > 0.04f) { ok = 0; r->why = "soc_err"; }
     switch (c->fault) {
     case MC_F_NONE:                       /* + stres indeksinin yeni kriterleri (Tdot, H) tetiklenmez */
@@ -220,7 +221,7 @@ uint32_t mc_line_rs(const mc_cfg_t *c, char *buf)
     p = p_str(p, " SOC0=");  p = p_fix(p, 100.0f * c->soc0, 0);
     p = p_str(p, " k=");  p = p_fix(p, c->k_cur, 2);
     p = p_str(p, " b=");  p = p_fix(p, c->bias, 1);
-    if (c->fault == MC_F_AGED) { p = p_str(p, " kr=");  p = p_fix(p, c->kr, 2); }
+    if (c->fault == MC_F_AGED) { p = p_str(p, " soh=");  p = p_fix(p, 100.0f * c->soh, 0); }
     else if (c->fault != MC_F_NONE && c->fault != MC_F_OFFSET) { p = p_str(p, " tf=");  p = p_fix(p, c->t_fault, 1); }
     *p = 0;
     return (uint32_t)(p - buf);

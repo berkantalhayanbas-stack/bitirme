@@ -67,7 +67,7 @@ void twin_init(twin_t *tw, float soc0, float t_amb, float dt)
     twin_set_soc(tw, soc0);
     tw->tc = tw->ts = tw->t_amb = t_amb;
     tw->ru_k = 1.0f;
-    tw->kq = tw->kr = 1.0f;
+    tw->kq = tw->kr = tw->soh = 1.0f;
     tw->dt = dt;
     tw->a1 = expf(-dt / (CELL_R1 * CELL_C1));
     tw->a2 = expf(-dt / (CELL_R2 * CELL_C2));
@@ -94,11 +94,13 @@ void twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float
     const float r2t = CELL_R2 * expf(CELL_EA_R2 / RGAS * u);
     tw->a1 = expf(-dt / (r1t * CELL_C1));
     tw->a2 = expf(-dt / (r2t * CELL_C2));
+    const float kq_a = tw->kq * tw->soh;                            /* yaşlanma */
+    const float kr_a = tw->kr * (1.0f + TW_AGE_BETA * (1.0f - tw->soh));
     float q = 0.0f, vs = 0.0f, ss = 0.0f, vmin = 10.0f, vmax = 0.0f, smin = 2.0f, smax = -1.0f;
 
     for (uint8_t j = 0; j < TW_NG; j++) {
         tw_group_t *g = &tw->g[j];
-        const float kr  = GRP_KR(j) * tw->kr;
+        const float kr  = GRP_KR(j) * kr_a;
         const uint8_t on = bal_mask >> j & 1u;
         const float ig  = on ? i + ib : i;
         const float ocv = twin_ocv(g->soc);
@@ -107,7 +109,7 @@ void twin_step(twin_t *tw, float i_pack, uint32_t bal_mask, float i_bleed, float
         g->v2 = tw->a2 * g->v2 + r2t * kr * (1.0f - tw->a2) * ig;
         g->v  = ocv - r0 * ig - g->v1 - g->v2;
         q += i * (ocv - g->v);              /* Bernardi tersinmez ısı (entropik terim ihmal) */
-        g->soc -= (on ? ig + ibs : ig) * dt / (3600.0f * CELL_Q_AH * GRP_KQ(j) * tw->kq);
+        g->soc -= (on ? ig + ibs : ig) * dt / (3600.0f * CELL_Q_AH * GRP_KQ(j) * kq_a);
         vs += g->v;  ss += g->soc;
         if (g->v < vmin) vmin = g->v;
         if (g->v > vmax) vmax = g->v;

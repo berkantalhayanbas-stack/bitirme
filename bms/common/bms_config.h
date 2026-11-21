@@ -94,8 +94,11 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_TDOT_ON     3.0f        /* [°C/dk] Ψ_Tdot başlar */
 #define DEC_TDOT_FULL   10.0f       /* [°C/dk] tavana ulaşır */
 #define DEC_PSI_TDOT    0.5f        /* Ψ_Tdot tavanı */
+/* Ψ_H eşikleri SOH cinsinden (2026-11-21): direnç oranı = 1 + 1,31 (1 - SOH) (Kirkaldy 40 hücre,
+ * bitirme veri/age_resistance.py), EKF k_R gerçeğin ~%3-4 üstünde: 1,2 = SOH ~%86, 1,3 = SOH ~%80
+ * (ömür sonu). Önceki tam nokta 1,6 = SOH ~%55, kullanım ömrünün dışı. */
 #define DEC_KR_ON       1.2f        /* Ψ_H: EKF R0 ölçeği k_R */
-#define DEC_KR_FULL     1.6f
+#define DEC_KR_FULL     1.3f
 #define DEC_PSI_HEALTH  0.3f        /* Ψ_H tavanı */
 #define DEC_KR_SOP_MAX  2.0f        /* SOP direnci R0 · clamp(k_R, 1, 2) · Arrhenius(T) */
 #define DEC_KAPPA       0.25f       /* toplama ağırlığı (0: eski max) */

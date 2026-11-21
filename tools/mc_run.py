@@ -100,7 +100,7 @@ def summary(pc, stm):
     p("Randomized per run: T_amb 0-40 C, SOC0 35-95 %, drive severity x0.6-1.6, cycle offset, capacity +-2 %,")
     p("R +-5 %, current-sensor offset +-2.5 A; one fault (none 30 %, cooling 20 %, ext. heat 15 %, NTC open 15 %,")
     p("large current offset 4-12 A 20 %) at a random time 60-480 s. 40 % of the fault-free runs are aged packs")
-    p("(resistance x1.4-1.7 from the start; expected: stress-index criterion H). Fault-free runs must not raise")
+    p("(SOH 70-84 % from the start: capacity x SOH, resistance x 1 + 1.31 (1 - SOH); expected: stress-index criterion H). Fault-free runs must not raise")
     p("the new stress criteria (temperature-rise rate, resistance growth).")
     p()
     ref = stm if stm is not None else pc

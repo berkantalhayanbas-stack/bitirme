@@ -7,16 +7,16 @@
  *
  * Kütüphaneler : "mcp2515" (autowp), LiquidCrystal_I2C (Library Manager)
  * Bağlantı     : MCP2515 CS = D10, INT = D2, SPI D11/D12/D13; 500 kbit/s, kristal 8 MHz
- *                A0 pedal potu (yalnız "m 1" ile; varsayılan sürüş = hazır çevrim)
+ *                A0 arıza şiddeti potu (yoksa varsayılan şiddet; aşağıda "Şiddet")
  *                A1 LM35 çıkışı (ortam sıcaklığı, 10 mV/°C)       yoksa: 25 °C
  *                5 senaryo butonu D3, A2, A3, D4, D5 (GND'ye basar, dahili pull-up; aşağıda)
  *                16x2 I2C LCD (PCF8574, adres 0x27 ya da 0x3F) SDA A4, SCL A5   yoksa: yalnız seri
- * Algılama     : pedal açılışta (A0'da pull-up açıkken < 1000 okunursa var), LM35 her saniye
+ * Algılama     : pot açılışta (A0'da pull-up açıkken < 1000 okunursa var), LM35 her saniye
  *                (kısa pull-up darbesinden sonra makul aralıkta okunursa var), LCD açılışta I2C ACK.
  *
  * Sürüş modları ("m <n>"; açılışta 0):
  *   0 PROF  twin/drive_cycle.py sentetik çevrimi (hız izleyen sürücü), sürekli tekrar
- *   1 PEDL  pedal = çekiş kuvveti (0..1200 N; pot ya da "p"). Moda girince pedal bir kez
+ *   1 PEDL  pedal = çekiş kuvveti (0..1200 N; seri "p"). Moda girince pedal bir kez
  *           bırakılmalı (< %5).
  *   2 SARJ  araç durur, 0,7C (40,7 A) şarj talebi; ECU şarj izni sınırlar (CV bölgesi ECU'da)
  *   3 BEKL  araç durur ve park eder: 0 A (yardımcı yük de kapalı; dengeleme bu modda ve şarjda çalışır)
@@ -50,6 +50,11 @@
  *   D5  WATCHDOG ECU'ya 0x301 cmd 0x04 (CAN_CMD_UNLOCK): ECU sonsuz döngüye girer, IWDG sıfırlar,
  *                ECU SAFE-STOP'ta açılır (yalnız BMS_SAFETY=1 ECU derlemesinde).
  *   SAFE ve LIMP kilitlidir: çıkış NORMAL butonuyla (servis yeniden başlatması).
+ * Şiddet (A0 potu ya da seri "v"): uzun basış arızalarının büyüklüğü, arıza sürerken değiştirilebilir;
+ *   soğutma arızası R_u x(1 + 7 s), aşırı ısınma hızı 1,17 s °C/s (s = 0..1). Pot yoksa s = 3/7:
+ *   R_u x4 ve 0,5 °C/s (önceki sabit değerler). Arıza sürerken şiddet değişince LCD 3 s gösterir.
+ * Yaşlanma (seri "y <SOH %>"): ikizin kapasitesi SOH katı, direnci 1 + 1,31 (1 - SOH) katı
+ *   (twin_model.h TW_AGE_BETA, Kirkaldy 40 hücre). ECU'ya söylenmez; EKF k_R'den bulur (Ψ_H).
  *   D3 basılı açılış  sıcak gün: ortam = LM35 + 15 °C (LM35 yoksa 40 °C; twin hot_day).
  *   LM35 kopması açılışta LM35 vardıysa ve sonra kaybolursa sıcaklık sensörü kopuk sayılır:
  *                0x101 T = -40 °C (cmd 0x14 ile aynı) -> ECU sensör teşhisi -> LIMP. Takılınca kalkar.
@@ -68,7 +73,9 @@
  *   f <0|1>          soğutma arızası        i <0|1>  aşırı ısınma         h <0|1>  sıcak gün (+15 °C)
  *   k <1-5>          butona kısa basış (1 NORMAL, 2 DERATE, 3 LIMP, 4 STOP, 5 WATCHDOG; demo_run.py)
  *   l <1-5>          butona uzun basış (2 soğutma arızası, 4 aşırı ısınma; diğerleri = kısa)
- *   p <0..100>       pedal yüzdesi (pot yerine; PEDL moduna geçer; p -1 = pota dön)
+ *   p <0..100>       pedal yüzdesi (PEDL moduna geçer)
+ *   v <0..100>       arıza şiddeti yüzdesi (pot yerine; v -1 = pota / varsayılana dön)
+ *   y <50..100>      ikizin SOH'si (yaşlanma; 100 = yeni)
  *   t <°C>           paket sıcaklığını hedefe getir (çekirdek = yüzey), örnek başına en çok 0,5 °C:
  *                    ani sıçrama ECU'nun sıcaklık hızı teşhisine (2 °C/örnek) takılıp LIMP verirdi
  * Her basışta (buton ya da k/l) bir satır: B,<olay>,<1 başladı | 0 kaldırıldı>; olay = EV_* (0 NORMAL
@@ -91,7 +98,7 @@ extern "C" {
 }
 
 const uint8_t  PIN_CS = 10, PIN_INT = 2;
-const uint8_t  PIN_PEDAL = A0, PIN_LM35 = A1;
+const uint8_t  PIN_POT = A0, PIN_LM35 = A1;
 /* mod butonları (dosya başı): D3 NORMAL, A2 DERATE, A3 LIMP, D4 STOP, D5 WATCHDOG */
 enum { B_NORM, B_DER, B_LIMP, B_STOP, B_WDG, N_SC };
 const uint8_t  PIN_SC[N_SC] = { 3, A2, A3, 4, 5 };
@@ -107,7 +114,7 @@ const char EV_TXT[N_EV][2][17] PROGMEM = {
   { "SOGUTMA>DERATE  ", "SOGUTMA ONARILDI" },
   { "ISINMA>LIMP>STOP", "ISINMA: SOGUYOR " } };
 const float    T_HEAT_MAX = 62.0f, HEAT_RATE = 0.05f;   /* °C, °C/örnek (0,5 °C/s; ECU hız teşhisi 2) */
-const float    RU_FAULT = 4.0f;            /* twin cooling_fault: R_u x4 */
+const float    SEV_DEF  = 3.0f / 7.0f;    /* pot yoksa şiddet: R_u x4 (twin cooling_fault), 0,5 °C/s */
 const float    T_HOT    = 15.0f;           /* sıcak gün ortam ofseti [°C] (25 + 15 = twin hot_day 40 °C) */
 const uint32_t TX_PERIOD = 100;            /* ms, = BMS_TS */
 const float    DT = 0.1f;
@@ -138,8 +145,9 @@ uint8_t  mode = M_PROF;
 float    veh_v = 0.0f;                     /* araç hızı [m/s] */
 float    I_dem = 0.0f, I_act = 0.0f;
 float    pedal = 0.0f;
-uint8_t  have_pedal = 0, pedal_armed = 0, brake = 0;
-int8_t   pedal_force = -1;                 /* seri "p": 0..100 %, -1 = pot */
+uint8_t  have_pot = 0, pedal_armed = 0, brake = 0;
+int8_t   sev_force = -1;                   /* seri "v": 0..100 %, -1 = pot / varsayılan */
+float    sev = SEV_DEF, sev_shown = -1.0f; /* arıza şiddeti 0..1; LCD'de son gösterilen */
 float    t_pack_goal = 99.0f;              /* seri "t": paket sıcaklığı hedefi (99 = yok) */
 
 /* sentetik çevrim: (hedef km/h, hızlanma s, sabit s, yavaşlama s, bekleme s) */
@@ -186,7 +194,7 @@ uint8_t  svc = 0;                          /* NORMAL servis adımı: 0 yok, 1 so
 uint32_t svc_t = 0, svc_t0 = 0;            /* adım zamanı / servis başlangıcı */
 uint8_t  svc_n = 0, svc_round = 0, svc_seen = 0;
 int8_t   ev_sc = -1;                       /* LCD'de gösterilen son bildirim (EV_*, -1 yok) */
-uint8_t  ev_on = 0;
+uint8_t  ev_on = 0, ev_sev = 0;            /* ev_sev: bildirim yerine şiddet satırı */
 uint32_t ev_until = 0, t_page = 0;
 
 /* ---------------------------------------------------------------- hata enjeksiyonu (0x10-0x14) */
@@ -309,8 +317,10 @@ void press(uint8_t k, uint8_t lng, uint32_t now);
 void setCoolFault(uint8_t on)
 {
   cool_fault = on;
-  tw.ru_k = on ? RU_FAULT : 1.0f;
-  Serial.println(on ? F("cooling fault ON (R_u x4)") : F("cooling fault OFF"));
+  tw.ru_k = on ? 1.0f + 7.0f * sev : 1.0f;
+  Serial.print(on ? F("cooling fault ON (R_u x") : F("cooling fault OFF"));
+  if (on) { Serial.print(tw.ru_k, 1); Serial.print(')'); }
+  Serial.println();
 }
 
 void readInputs(uint8_t tick, uint32_t now)
@@ -340,10 +350,15 @@ void readInputs(uint8_t tick, uint32_t now)
   } else if (!lm35_seen) { t_amb = 25.0f + hot; lm35_init = 0; }
   /* koptuysa ortam son değerde kalır */
 
-  if (pedal_force >= 0) pedal = pedal_force * 0.01f;
-  else if (have_pedal) {
-    const float p = (analogRead(PIN_PEDAL) - 30) * (1.0f / 960.0f);
-    pedal = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+  /* arıza şiddeti: seri "v" > pot > varsayılan; soğutma arızası sürerken R_u izler */
+  if (sev_force >= 0) sev = sev_force * 0.01f;
+  else if (have_pot) {
+    const float p = (analogRead(PIN_POT) - 30) * (1.0f / 960.0f);
+    sev = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+  } else sev = SEV_DEF;
+  if (cool_fault) tw.ru_k = 1.0f + 7.0f * sev;
+  if ((cool_fault || heat_on == 1) && fabsf(sev - sev_shown) > 0.03f) {   /* LCD 3 s */
+    sev_shown = sev;  ev_sev = 1;  ev_until = now + 3000;
   }
 
   /* butonlar 100 ms'de bir örneklenir (sıçrama süzgeci yerine geçer). Kısa basış bırakınca,
@@ -361,7 +376,7 @@ void readInputs(uint8_t tick, uint32_t now)
 /* LCD'de 3 s bildirim: i = EV_*, on = 1 arıza/senaryo başladı, 0 kaldırıldı */
 void notify(uint8_t i, uint8_t on, uint32_t now)
 {
-  ev_sc = i;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0;
+  ev_sc = i;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0;  ev_sev = 0;  sev_shown = sev;
   /* gateway satırı (tools/web/gateway.py --emu): B,<EV_*>,<1 başladı | 0 kaldırıldı> */
   Serial.print(F("B,"));  Serial.print(i);  Serial.print(',');  Serial.println(on);
 }
@@ -558,7 +573,8 @@ void step(uint32_t now)
   if (heat_on) {                                      /* A2: aşırı ısınma / soğuma rampası */
     const float g = heat_on == 1 ? T_HEAT_MAX : t_amb + 2.0f;
     const float e = g - tw.ts;
-    const float d = e > HEAT_RATE ? HEAT_RATE : (e < -HEAT_RATE ? -HEAT_RATE : e);
+    const float r = heat_on == 1 ? HEAT_RATE * sev / SEV_DEF : HEAT_RATE;   /* soğuma sabit hızda */
+    const float d = e > r ? r : (e < -r ? -r : e);
     tw.ts += d;  tw.tc += d;
     if (heat_on == 2 && d == e) heat_on = 0;          /* ortama yaklaştı: ikizin kendi termali sürer */
   }
@@ -587,7 +603,7 @@ void serialCommands(uint32_t now)
     while (*p == ' ') p++;
     const char k = *p++ | 0x20;
     const long a = strtol(p, &e, 0);
-    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC> | b <k> | f/i/h <0|1> | k/l <1-5> | p | t")); continue; }
+    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC> | b <k> | f/i/h <0|1> | k/l <1-5> | p | t | v | y")); continue; }
     if (k == 'c') {
       p = e;
       const long val = strtol(p, &e, 0);
@@ -600,9 +616,10 @@ void serialCommands(uint32_t now)
     else if (k == 'f') setCoolFault(a != 0);
     else if (k == 'i') { if ((heat_on == 1) != (a != 0)) press(B_STOP, 1, now); }
     else if ((k == 'k' || k == 'l') && a >= 1 && a <= N_SC) press(a - 1, k == 'l', now);
-    else if (k == 'p' && a >= -1 && a <= 100) {
-      pedal_force = a;
-      if (a >= 0) { mode = M_PEDAL; pedal_armed = 1; }
+    else if (k == 'v' && a >= -1 && a <= 100) { sev_force = a; Serial.println(F("severity set")); }
+    else if (k == 'y' && a >= 50 && a <= 100) { tw.soh = a * 0.01f; Serial.println(F("twin SOH set")); }
+    else if (k == 'p' && a >= 0 && a <= 100) {
+      pedal = a * 0.01f;  mode = M_PEDAL;  pedal_armed = 1;
       Serial.println(F("pedal set"));
     }
     else if (k == 't' && a > -20 && a < 70) { t_pack_goal = a; Serial.println(F("pack T ramp")); }
@@ -641,6 +658,8 @@ void report(uint32_t now)
   if (cool_fault) Serial.print(F("COOL "));
   if (hot_day)    Serial.print(F("HOT "));
   if (heat_on)    Serial.print(heat_on == 1 ? F("HEAT ") : F("COOLDOWN "));
+  if (cool_fault || heat_on == 1) { Serial.print(F("SEV")); Serial.print((int)(sev * 100.0f + 0.5f)); Serial.print(' '); }
+  if (tw.soh < 0.995f) { Serial.print(F("SOH")); Serial.print((int)(tw.soh * 100.0f + 0.5f)); Serial.print(' '); }
   Serial.println();
 }
 
@@ -658,7 +677,10 @@ void lcdUpdate(uint8_t row)
   const uint8_t st = mon_ctrl.fault ? 5 : (have_ctrl ? (last_ctrl.state <= 4 ? last_ctrl.state : 0) : 0);
   lcd->setCursor(0, row);
   if ((int32_t)(millis() - ev_until) < 0 && ev_sc >= 0) {   /* senaryo bildirimi (3 s) */
-    if (!row) lcd->print((const __FlashStringHelper *)EV_TXT[ev_sc][ev_on ? 0 : 1]);
+    if (!row && ev_sev) {                                     /* şiddet: SOGUTMA Ru x4.0 / ISINMA 0.50C/s */
+      if (cool_fault) { lcd->print(F("SOGUTMA Ru x")); lcdNum(tw.ru_k, 3, 1); lcd->print(' '); }
+      else            { lcd->print(F("ISINMA ")); lcdNum(HEAT_RATE * sev / SEV_DEF * 10.0f, 4, 2); lcd->print(F("C/s ")); }
+    } else if (!row) lcd->print((const __FlashStringHelper *)EV_TXT[ev_sc][ev_on ? 0 : 1]);
     else      { lcd->print(F("ECU ")); lcd->print(STATE_NAME[st]); lcd->print(F(" Id")); lcdNum(last_ctrl.I_allow_dis, 4, 0);
                 lcd->print(F("A  ")); }
   } else if (page == 0) {        /* PROF NORM  42kmh / I+ 23.4 SOC 78.2 */
@@ -697,11 +719,10 @@ void setup()
   hot_day = digitalRead(PIN_SC[B_NORM]) == LOW;
   if (hot_day) btn_n[B_NORM] = 255;                   /* bırakış ve basılı tutma tetiklemesin */
 
-  /* pedal var mı: pull-up açıkken kopuk pin 1023 okur; pot herhangi bir konumda daha düşük.
-   * Varsayılan sürüş hazır çevrim (PROF); pot yalnız "m 1" ile kullanılır. */
-  pinMode(PIN_PEDAL, INPUT_PULLUP);  delay(2);
-  have_pedal = analogRead(PIN_PEDAL) < 1000;
-  pinMode(PIN_PEDAL, INPUT);
+  /* şiddet potu var mı: pull-up açıkken kopuk pin 1023 okur; pot herhangi bir konumda daha düşük */
+  pinMode(PIN_POT, INPUT_PULLUP);  delay(2);
+  have_pot = analogRead(PIN_POT) < 1000;
+  pinMode(PIN_POT, INPUT);
   mode = M_PROF;
 
   /* LCD: 0x27 ya da 0x3F'te ACK veren PCF8574 */
@@ -718,8 +739,8 @@ void setup()
   }
 
   Serial.println();
-  Serial.print(F("=== twin_emu: 10 Hz pack twin, TX 0x101/0x102, RX 0x201/0x202 | pedal "));
-  Serial.print(have_pedal ? F("yes") : F("no"));
+  Serial.print(F("=== twin_emu: 10 Hz pack twin, TX 0x101/0x102, RX 0x201/0x202 | pot "));
+  Serial.print(have_pot ? F("yes") : F("no"));
   Serial.print(F(" | LCD "));  Serial.print(lcd ? F("yes") : F("no"));
   Serial.print(F(" | mode "));  Serial.print(MODE_NAME[mode]);
   Serial.println(hot_day ? F(" | HOT DAY (+15 C)") : F(""));

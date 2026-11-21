@@ -13,6 +13,11 @@
  * "zayıf": -%5 kapasite, +%15 direnç, closed_loop.py'deki zayıf grubun hafifi). Pasif dengeleme:
  * maskede biti 1 olan grubun 12 hücresinden toplam i_bleed çekilir (direnç ısısı hücreye girmez).
  * Termal model ortalama hücre için tektir (gruplar arası sıcaklık farkı modellenmez).
+ *
+ * Yaşlanma: soh = kapasite oranı (1 = yeni, 0,8 = ömür sonu). Direnç (R0, R1, R2) onunla birlikte
+ * 1 + TW_AGE_BETA (1 - soh) katına çıkar: Kirkaldy vd. (2024) LG M50T, 40 hücre / 224 RPT, 0,1 s
+ * direnci - C/10 kapasitesi (bitirme veri/age_resistance.py). Python battery_model.aged_cell() ve
+ * simulink bms_param_struct.m (P.age_beta) aynı ilişkiyi kullanır.
  */
 #ifndef TWIN_MODEL_H
 #define TWIN_MODEL_H
@@ -21,6 +26,7 @@
 #define TW_NG       19          /* seri grup sayısı */
 #define TW_NS       19
 #define TW_NP       12
+#define TW_AGE_BETA 1.31f       /* direnç artışı / kapasite kaybı */
 
 typedef struct {
     float soc, v1, v2;          /* durum: SOC, RC1 ve RC2 gerilimleri (hücre) */
@@ -33,6 +39,7 @@ typedef struct {
     float t_amb;                /* ortam [°C], her adımdan önce dışarıdan yazılabilir */
     float ru_k;                 /* soğutma direnci çarpanı (1 = sağlam; soğutma arızası 4, twin cooling_fault) */
     float kq, kr;               /* paket kapasite / direnç çarpanı (1 = nominal; Monte Carlo hücre sapması) */
+    float soh;                  /* yaşlanma: kapasite oranı (1 = yeni); direnç 1 + TW_AGE_BETA (1 - soh) */
     float a1, a2, dt;           /* RC ayrıklaştırma katsayıları (ZOH) */
     float v_pack, v_min, v_max; /* çıktı: paket gerilimi, en düşük / en yüksek grup gerilimi */
     float soc_avg;              /* çıktı: grup SOC ortalaması */

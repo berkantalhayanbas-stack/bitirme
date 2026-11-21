@@ -19,7 +19,8 @@
 #include "bms_algo.h"
 
 #define MC_STEPS   6000u        /* 600 s, Ts = 0,1 s */
-/* MC_F_AGED: yaşlanmış paket (direnç x1,4-1,7, baştan); arızasız koşuların ~%40'ından seçilir,
+/* MC_F_AGED: yaşlanmış paket (SOH %70-84 baştan: kapasite SOH katı, direnç 1 + 1,31 (1 - SOH),
+ * twin_model.h TW_AGE_BETA); arızasız koşuların ~%40'ından seçilir,
  * diğer senaryoların çekilişleri değişmez. Beklenen: stres indeksinin Ψ_H kriteri (neden 1024). */
 enum { MC_F_NONE, MC_F_COOL, MC_F_HEAT, MC_F_NTC, MC_F_OFFSET, MC_F_AGED, MC_F_N };
 
@@ -27,6 +28,7 @@ typedef struct {
     uint32_t id, seed;
     uint8_t  fault;
     float    t_amb, soc0, k_cur, kq, kr, bias, t_fault;
+    float    soh;               /* yaşlanma (1 = yeni; twin_t.soh) */
     uint32_t cyc_off;           /* çevrim başlangıç kaydırması [s] */
 } mc_cfg_t;
 
