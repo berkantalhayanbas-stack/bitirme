@@ -73,6 +73,8 @@ class Reader(threading.Thread):
 
 def build_figure():
     import matplotlib.pyplot as plt
+    import thesis_style as ts                       # ortak tez figür stili
+    ts.apply()
     fig, ax = plt.subplots(5, 1, figsize=(11, 10), sharex=True,
                            gridspec_kw=dict(height_ratios=[1, 1, 1.2, 1, 0.6]))
     L = {}
@@ -80,7 +82,7 @@ def build_figure():
     ax[0].set_ylabel("SOC [%]")
     L["tc"], = ax[1].plot([], [], "r-", lw=1.3, label="T_core estimate")
     L["ts"], = ax[1].plot([], [], "m--", lw=1.0, label="T_surf estimate")
-    L["T"], = ax[1].plot([], [], ".", color="0.5", ms=2, label="T measured")
+    L["T"], = ax[1].plot([], [], ".", color=ts.MUTED, ms=2, label="T measured")
     ax[1].set_ylabel("Temperature [°C]")
     L["I"], = ax[2].plot([], [], "k-", lw=0.9, label="I measured")
     L["idis"], = ax[2].plot([], [], "g-", lw=1.4, label="+I_allow discharge")

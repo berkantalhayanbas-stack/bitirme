@@ -201,13 +201,15 @@ def plot(rate, x, bits, t_bits, frames, spb, out, tb_us):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import thesis_style as ts                       # ortak tez figür stili
+    ts.apply()
     t_us = np.arange(len(x)) / rate * 1e6
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(15, 7.5), gridspec_kw=dict(height_ratios=[1, 2.2]))
     a1.step(t_us, x, where="post", lw=0.7, color="k")
     for f in frames:
         t0 = f["t0"] / rate * 1e6
-        a1.axvline(t0, color="tab:blue", lw=0.8, ls=":")
-        a1.text(t0, 1.15, f"0x{f['id']:03X}" if f["id"] is not None else "?", fontsize=8, color="tab:blue")
+        a1.axvline(t0, color=ts.BLUE, lw=0.8, ls=":")
+        a1.text(t0, 1.15, f"0x{f['id']:03X}" if f["id"] is not None else "?", fontsize=8, color=ts.BLUE)
     a1.set_ylim(-0.3, 1.45); a1.set_yticks([0, 1]); a1.set_yticklabels(["dom", "rec"])
     a1.set_xlabel("Time [µs]"); a1.set_title(f"PA11 (CAN RX) captured by the STM32 itself: TIM6-triggered DMA "
                                              f"of GPIOA->IDR, {rate / 1e6:.2f} MS/s, {len(x)} samples")
@@ -238,7 +240,7 @@ def plot(rate, x, bits, t_bits, frames, spb, out, tb_us):
             narrow += 1
         a2.text((ta + tb) / 2 / rate * 1e6, y, fld, ha="center", fontsize=7.5)
     stuff_t = [t_bits[ri] for ri, fld in zip(f["raw_idx"], f["field"]) if fld == "stuff"]
-    a2.plot([(t + spb / 2) / rate * 1e6 for t in stuff_t], [-0.15] * len(stuff_t), "v", color="#cb181d",
+    a2.plot([(t + spb / 2) / rate * 1e6 for t in stuff_t], [-0.15] * len(stuff_t), "v", color=ts.RED,
             ms=6, label=f"stuff bits ({len(stuff_t)})")
     data = " ".join(f"{b:02X}" for b in f["data"])
     a2.set_title(f"Frame 1 decoded: ID 0x{f['id']:03X}, DLC {f['dlc']}, data [{data}], "

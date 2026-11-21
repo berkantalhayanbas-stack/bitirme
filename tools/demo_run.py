@@ -169,22 +169,25 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import thesis_style as ts                       # ortak tez figür stili
+    ts.apply()
     d = pd.read_csv(CSV)
     fig, ax = plt.subplots(3, 1, figsize=(10, 7), sharex=True)
     ax[0].plot(d.t, d.I, label="Pack current I")
     ax[0].plot(d.t, d.Idis, label="Allowed discharge I_allow")
     ax[0].set_ylabel("A"); ax[0].legend(loc="upper right")
     ax[1].plot(d.t, d.Tc, label="True core T (twin)")
-    ax[1].plot(d.t, d.tc_ecu, "--", label="ECU estimate")
+    ax[1].plot(d.t, d.tc_ecu, label="ECU estimate")
     ax[1].set_ylabel("°C"); ax[1].legend(loc="upper right")
-    ax[2].step(d.t, d.state, where="post")
+    ax[2].step(d.t, d.state, where="post", color=ts.INK2, lw=1)
+    ts.state_band(ax[2], d.t, d.state, legend=False)
     ax[2].set_yticks([0, 1, 2, 3, 4]); ax[2].set_yticklabels(["no msg", "NORMAL", "DERATE", "LIMP", "SAFE"])
     ax[2].set_xlabel("time [s]")
     for t, b in olaylar:
         for x in ax:
-            x.axvline(t, color="gray", lw=0.6, ls=":")
-        ax[0].text(t, ax[0].get_ylim()[1], " " + b, fontsize=7, va="top", rotation=90)
-    fig.tight_layout(); fig.savefig(PNG, dpi=130)
+            x.axvline(t, color=ts.MUTED, lw=0.6, ls=":")
+        ax[0].text(t, ax[0].get_ylim()[1], " " + b, fontsize=7, va="top", rotation=90, color=ts.INK2)
+    fig.tight_layout(); fig.savefig(PNG, dpi=200)
     yaz(f"grafik -> {os.path.relpath(PNG, ROOT)}")
 except Exception as e:
     yaz(f"grafik cizilemedi: {e}")

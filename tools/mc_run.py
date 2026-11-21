@@ -144,14 +144,16 @@ def plot(ref, src):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import thesis_style as ts                       # ortak tez figür stili
+    ts.apply()
     fig, ax = plt.subplots(1, 3, figsize=(12.5, 3.9))
     order = ["none", "cooling", "ext_heat", "ntc_open", "i_offset"]
-    col = {"none": "#9a9990", "cooling": "#2a78d6", "ext_heat": "#eb6834", "ntc_open": "#3f9e5a", "i_offset": "#8a5cc2"}
+    col = {"none": ts.MUTED, "cooling": ts.BLUE, "ext_heat": ts.ORANGE, "ntc_open": ts.AQUA, "i_offset": ts.YELLOW}
     # (a) PASS oranı
     g = ref.groupby("fault")
     n = g.size().reindex(order).fillna(0)
     pas = g.verdict.apply(lambda v: (v == "PASS").sum()).reindex(order).fillna(0)
-    ax[0].bar(order, n, color="#e4e3dd")
+    ax[0].bar(order, n, color=ts.LIGHT)
     ax[0].bar(order, pas, color=[col[o] for o in order])
     for i, o in enumerate(order):
         ax[0].text(i, n[o], f"{int(pas[o])}/{int(n[o])}", ha="center", va="bottom", fontsize=8)
@@ -172,19 +174,17 @@ def plot(ref, src):
     # (c) dış ısı: LIMP / SAFE anında gerçek çekirdek sıcaklığı (ECU yüzeyi ölçer, çekirdeği kestirir)
     h = ref[ref.fault == "ext_heat"]
     bins = np.arange(52.0, 62.01, 0.2)
-    ax[2].hist(h.tc_limp[h.tc_limp > -90], bins=bins, color="#f2b134", label="at LIMP-HOME")
-    ax[2].hist(h.tc_safe[h.tc_safe > -90], bins=bins, color="#d03b2a", label="at SAFE-STOP")
+    ax[2].hist(h.tc_limp[h.tc_limp > -90], bins=bins, color=ts.SERIOUS, label="at LIMP-HOME")
+    ax[2].hist(h.tc_safe[h.tc_safe > -90], bins=bins, color=ts.CRITICAL, label="at SAFE-STOP")
     for lim, lab in ((55, "LIMP limit 55 °C"), (60, "SAFE limit 60 °C")):
-        ax[2].axvline(lim, color="#1f1f1e", lw=0.8, ls="--")
+        ax[2].axvline(lim, color=ts.MUTED, lw=0.8, ls="--")
         ax[2].text(lim + 0.1, ax[2].get_ylim()[1] * 0.95, lab, fontsize=7.5, va="top")
     ax[2].set_xlabel("true core temperature at the transition [°C]")
     ax[2].set_ylabel("ext_heat runs")
     ax[2].set_title(f"(c) external heat: true core at LIMP / SAFE (n = {len(h)})", loc="left", fontsize=9)
-    ax[2].legend(frameon=False, fontsize=7.5, loc="center left")
+    ax[2].legend(frameon=False, fontsize=7.5, loc="upper left")
     for x in ax:
-        x.grid(color="#d6d5cf", lw=0.6); x.set_axisbelow(True)
-        for sp in ("top", "right"):
-            x.spines[sp].set_visible(False)
+        x.grid(axis="x", visible=False)
     fig.suptitle(f"On-target Monte Carlo: {len(ref)} randomized closed-loop runs on STM32G431 ({src})",
                  x=0.01, ha="left", fontsize=10, fontweight="bold")
     fig.tight_layout()
