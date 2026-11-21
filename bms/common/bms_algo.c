@@ -362,7 +362,13 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     if (Tc_hat > DEC_T_SAFE || d->n_hs >= DEC_N_HARD || d->n_lo >= DEC_N_HARD || d->n_hi >= DEC_N_HARD || !CAN_ok
         || d->state == ST_SAFE) {
         d->state = ST_SAFE;  d->i_dis = 0.0f;  d->i_chg = 0.0f;
-        o->state = ST_SAFE;  o->i_allow_dis = 0.0f;  o->i_allow_chg = 0.0f;  o->psi = 1.0f;  o->cause = 128;
+        /* termal olay: akım yokken yüzey ortamın üstünde ısınmayı sürdürüyor (bms_config.h DEC_TE_*) */
+        d->n_i0 = (fabsf(I_meas) < DEC_TE_I_MAX) ? (d->n_i0 < DEC_TE_WAIT ? d->n_i0 + 1 : DEC_TE_WAIT) : 0;
+        const uint8_t rising = CAN_ok && T_valid && T_meas > T_amb && d->tdot > DEC_TE_RATE;
+        d->n_te = (rising && d->n_i0 > 0 && (T_anom || d->n_i0 >= DEC_TE_WAIT)) ? d->n_te + 1 : 0;
+        if (d->n_te >= DEC_TE_N) d->tevt = 1;
+        o->state = ST_SAFE;  o->i_allow_dis = 0.0f;  o->i_allow_chg = 0.0f;  o->psi = 1.0f;
+        o->cause = (uint16_t)(128 | (d->tevt ? 2048 : 0));
         return;
     }
 

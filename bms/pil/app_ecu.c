@@ -214,11 +214,11 @@ static void apply_outputs(uint8_t state, float i_allow_dis)
  * E,<t_ms>,0,<code>,<detail>: açılış, durum geçişi, neden bitinin yükselmesi, CAN kaybı, kontaktör.
  * Yalnız değişimde yazılır (10 Hz satırın yanında birkaç bayt). */
 static const char *const ST_CODE[5] = { "-", "NORMAL", "DERATE", "LIMP_HOME", "SAFE_STOP" };
-#define N_CAUSE 11
+#define N_CAUSE 12
 static const char *const CAUSE_CODE[N_CAUSE] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
                                            "SOP_CHARGE", "DATASHEET_T_LIMIT", "SENSOR_FAULT", "SOC_EMPTY",
                                            "HARD_LIMIT", "THERMAL_ANOMALY", "TEMP_RISE_RATE",
-                                           "RESISTANCE_GROWTH" };
+                                           "RESISTANCE_GROWTH", "THERMAL_EVENT" };
 static void ev(uint32_t t_ms, const char *code)
 {
     put_s("E,");  put_u(t_ms);  put_s(",0,");  put_s(code);  put_s(",");

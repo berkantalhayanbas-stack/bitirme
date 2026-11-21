@@ -305,10 +305,10 @@
 // ECU durum kodları (bms_algo.h): 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP
 const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
 // neden bitleri (bms_algo.h): 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş, 128 sert sınır,
-// 256 anomali, 512 sıcaklık artış hızı, 1024 direnç artışı
+// 256 anomali, 512 sıcaklık artış hızı, 1024 direnç artışı, 2048 termal olay (SAFE'te akımsız ısınma)
 const CAUSES = [[1, 'Thermal derate'], [2, 'Cooling alarm'], [4, 'SOP discharge'], [8, 'SOP charge'], [16, 'Datasheet T limit'],
                 [32, 'Sensor fault'], [64, 'SOC empty'], [128, 'Hard limit'], [256, 'Thermal anomaly'],
-                [512, 'Temp. rise rate'], [1024, 'Resistance growth']];
+                [512, 'Temp. rise rate'], [1024, 'Resistance growth'], [2048, 'Thermal event']];
 // stres indeksinin kriterleri (bms_algo.h PSI_*): alan, ad, tavan, sade dil; baskın kriter kodu = sıra + 1
 const CRIT = [['psi_t', 'Core temperature', 1.0, 'battery temperature'], ['psi_c', 'Cooling alarm', 0.3, 'a suspected cooling fault'],
               ['psi_tdot', 'Temperature rise rate', 0.5, 'a fast temperature rise'], ['psi_h', 'Cell resistance (k_R)', 0.3, 'cell ageing (higher resistance)']];
@@ -613,7 +613,8 @@ const I_NOM_DIS = 7.275 * 12, I_NOM_CHG = 3.395 * 12, T_SCALE = 65;
 const REASON = [[1, 'the battery is warm'], [2, 'a cooling fault is suspected'], [4, 'a cell voltage is low'],
                 [8, 'a cell voltage is high'], [16, 'it is too warm to charge at full rate'], [32, 'a sensor has failed'],
                 [64, 'the battery is nearly empty'], [128, 'a hard safety limit was reached'], [256, 'unexplained heating was detected'],
-                [512, 'the temperature is rising quickly'], [1024, 'the cells have aged (higher resistance)']];
+                [512, 'the temperature is rising quickly'], [1024, 'the cells have aged (higher resistance)'],
+                [2048, 'the battery keeps heating with no current flowing']];
 const TITLE = ['Waiting for data', 'Battery OK', 'Power limited', 'Limp-home mode', 'Battery disconnected'];
 const BASE = ['', 'Full power is available.', '', 'Reduced power to reach a safe stop.', 'The contactor is open; no power is available.'];
 const ICON = ['·', '✓', '!', '!', '✕'];
@@ -623,6 +624,7 @@ const EVTXT = { BOOT: 'Battery controller started', NORMAL: 'Back to normal', DE
   DATASHEET_T_LIMIT: 'Charging limited by temperature', SENSOR_FAULT: 'Sensor fault', SOC_EMPTY: 'Battery nearly empty',
   HARD_LIMIT: 'Hard safety limit reached', THERMAL_ANOMALY: 'Unexplained heating detected', CAN_TIMEOUT: 'Measurements lost',
   TEMP_RISE_RATE: 'Temperature rising quickly, power reduced', RESISTANCE_GROWTH: 'Cell ageing detected, power reduced',
+  THERMAL_EVENT: 'THERMAL EVENT: battery heating with no current. Leave the vehicle',
   CONTACTOR_OPEN: 'Contactor opened', CONTACTOR_CLOSE: 'Contactor closed' };
 const pct = (v, m) => `${Math.max(0, Math.min(100, 100 * v / m))}%`;
 const kw = v => Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0);
@@ -638,6 +640,11 @@ function overview(x) {
   $('b_title').textContent = TITLE[st] ?? '?';
   const tail = why.length ? `Because ${why.join(' and ')}.` : '';
   $('b_text').textContent = [BASE[st], st >= 2 ? tail : ''].filter(Boolean).join(' ') || ' ';
+  if ((x.cause ?? 0) & 2048) {                 // termal olay: kontaktör açıkken ısınma sürüyor, en üst uyarı
+    $('b_title').textContent = 'THERMAL EVENT: leave the vehicle';
+    $('b_text').textContent = 'The battery keeps heating although it is disconnected and no current flows. ' +
+                              'Stop, switch off and move away from the vehicle; call emergency services.';
+  }
   // şarj
   $('o_soc').textContent = f(x.soc, 0);
   $('o_socbar').style.width = pct(x.soc ?? 0, 100);

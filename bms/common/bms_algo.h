@@ -77,6 +77,8 @@ typedef struct {
     float i_dis, i_chg;
     uint8_t td_on;                   /* Ψ_Tdot süzgeci başladı mı */
     float t_f, tdot;                 /* süzülmüş yüzey T, artış hızı [°C/dk] */
+    int   n_i0, n_te;                /* termal olay: SAFE'te akımsız örnek, koşul süresi */
+    uint8_t tevt;                    /* termal olay (kilitlenir) */
 } decision_t;
 enum { PSI_T = 0, PSI_C, PSI_TDOT, PSI_H, PSI_N };   /* baskın kriter kodu = indeks + 1 (0 yok) */
 typedef struct {
@@ -92,8 +94,9 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
                    uint8_t T_anom, float k_R, decision_out_t *o);
 /* cause bitleri: 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş,
- * 128 sert sınır, 256 termal anomali, 512 sıcaklık artış hızı, 1024 direnç artışı (0x201'de cause
- * 8 bit: anomali ve artış hızı bit 1'i de kurar; direnç artışının 8 bitlik karşılığı yok) */
+ * 128 sert sınır, 256 termal anomali, 512 sıcaklık artış hızı, 1024 direnç artışı, 2048 termal olay
+ * (yalnız SAFE'te: 128 | 2048) (0x201'de cause 8 bit: anomali ve artış hızı bit 1'i de kurar; direnç
+ * artışının ve termal olayın 8 bitlik karşılığı yok, 0x201 SAFE'te 128 gönderir) */
 
 /* ------------------------------------------------------------ ML: SOH ağacı */
 float soh_tree(float efc, float days, float T, float m, float dod, float rr);

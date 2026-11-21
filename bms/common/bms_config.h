@@ -120,6 +120,15 @@ static const float OCV_POLY[OCV_POLY_N] = {
                                        bağımsız. Gözlemci modellenmemiş ısıyı (dış kaynak, iç kısa
                                        devre başlangıcı) görmez; T_ss > 55 / 60 °C (1 s) LIMP / SAFE.
                                        HIL 3. bulgu: A2'de SAFE gerçek çekirdek 66 °C'de geliyordu. */
+/* Termal olay (SAFE'ten sonra): kontaktör açık, akım ~0, yine de yüzey ortamın üstünde ve ısınıyor
+ * -> ısı akımdan gelmiyor (dış kaynak / hücre içi termal olay). Kilitli, neden 2048 (UN GTR 20:
+ * yolculara erken uyarı). Kapanış sonrası çekirdek->yüzey ısı dengelenmesi (τ = Rc Cs Cc/(Cc+Cs)
+ * ~ 8 s, 30 s'lik tdot süzgeciyle) yanlış alarm vermesin diye: termal anomali kilitliyse hemen,
+ * değilse akım DEC_TE_WAIT boyunca ~0 kaldıktan sonra bakılır. */
+#define DEC_TE_I_MAX    2.0f        /* [A] paket: "akım yok" (kontaktör açık, sensör gürültüsü) */
+#define DEC_TE_RATE     1.0f        /* [°C/dk] süzülmüş yüzey artış hızı (Ψ_Tdot ile aynı süzgeç) */
+#define DEC_TE_WAIT     900         /* 90 s: anomalisiz yolda ısı dengelenmesini bekle [örnek] */
+#define DEC_TE_N        10          /* 1 s */
 #define DEC_SOC_EMPTY   0.03f
 #define DEC_V_SAFE_LO   2.50f
 #define DEC_V_SAFE_HI   4.25f
