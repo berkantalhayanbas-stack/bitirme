@@ -214,9 +214,11 @@ static void apply_outputs(uint8_t state, float i_allow_dis)
  * E,<t_ms>,0,<code>,<detail>: açılış, durum geçişi, neden bitinin yükselmesi, CAN kaybı, kontaktör.
  * Yalnız değişimde yazılır (10 Hz satırın yanında birkaç bayt). */
 static const char *const ST_CODE[5] = { "-", "NORMAL", "DERATE", "LIMP_HOME", "SAFE_STOP" };
-static const char *const CAUSE_CODE[9] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
+#define N_CAUSE 11
+static const char *const CAUSE_CODE[N_CAUSE] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
                                            "SOP_CHARGE", "DATASHEET_T_LIMIT", "SENSOR_FAULT", "SOC_EMPTY",
-                                           "HARD_LIMIT", "THERMAL_ANOMALY" };
+                                           "HARD_LIMIT", "THERMAL_ANOMALY", "TEMP_RISE_RATE",
+                                           "RESISTANCE_GROWTH" };
 static void ev(uint32_t t_ms, const char *code)
 {
     put_s("E,");  put_u(t_ms);  put_s(",0,");  put_s(code);  put_s(",");
@@ -235,7 +237,7 @@ static void events(uint32_t t_ms, uint8_t state, uint16_t cause, float tc, uint8
         kv(" cause=", cause);  kf(" Tc=", tc);  put_s("\r\n");
     }
     const uint16_t up = (uint16_t)(cause & ~cause_prev);
-    for (int b = 0; b < 9; b++)
+    for (int b = 0; b < N_CAUSE; b++)
         if (b != 7 && (up & (1u << b))) {                   /* 7 sert sınır: SAFE_STOP olayı yeter */
             ev(t_ms, CAUSE_CODE[b]);  kf("Tc=", tc);  put_s("\r\n");
         }
@@ -468,13 +470,19 @@ void ecu_run(void)
 #endif
 #if BMS_TELEMETRY >= 2
             /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
-             * CAN Rx FIFO'su boş). DX,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax */
+             * CAN Rx FIFO'su boş). DX,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax,
+             * Psi_T,Psi_C,Psi_Tdot,Psi_H,Psi,baskın,dT/dt[°C/dk],k_R. psi = toplam kısıtlama
+             * 1 - I_allow/I_nom (0x202), Psi = çok kriterli stres indeksi (CAN'da yok). Yeni alanlar
+             * sonda: eski çözücüler ilk 16 alanı okumaya devam eder (~140 karakter, ~12 ms). */
             if (send_ctrl) {
                 put_s("DX,");  put_u(now_ms);  put_s(",");  put_u(out.dec.state);  put_s(",");  put_u(out.dec.cause);
                 put_fix(100.0f * out.soc, 2);  put_fix(out.tc, 2);  put_fix(out.ts, 2);
                 put_fix(out.dec.i_allow_dis, 1);  put_fix(out.dec.i_allow_chg, 1);  put_fix(out.dec.psi, 3);
                 put_fix(100.0f * soh, 1);
                 put_fix(m1.I, 1);  put_fix(m1.V, 1);  put_fix(m1.T, 1);  put_fix(m2.V_min, 3);  put_fix(m2.V_max, 3);
+                for (int i = 0; i < PSI_N; i++) put_fix(out.dec.psi_i[i], 3);
+                put_fix(out.dec.psi_s, 3);  put_s(",");  put_u(out.dec.dom);
+                put_fix(out.dec.tdot, 2);  put_fix(out.kr, 3);
                 put_s("\r\n");
             }
 #endif

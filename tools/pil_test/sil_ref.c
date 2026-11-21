@@ -1,6 +1,7 @@
 /* sil_ref.c -- PC SIL referansı: bms/common'ı PC'de derleyip data/<senaryo>_in.csv'yi app_pil.c ile
  * aynı şekilde (bms_init(0.5, 1, 1, 0, 0), can_ok = 1) koşturur, data/<senaryo>_c.csv'yi yazar.
- * pil_test.py / can_replay.py kartın çıktısını bununla karşılaştırır.
+ * pil_test.py / can_replay.py kartın çıktısını bununla karşılaştırır. Son sütunlar (psi_s, dom, kr,
+ * tdot: çok kriterli stres indeksi) yalnız SIL'dedir; karta giden/gelen çerçeveler değişmedi.
  *
  * Derleme + çalıştırma: python tools/pil_test/sil_ref.py   (MATLAB'ın MinGW-w64 gcc'si ya da PATH'teki gcc)
  */
@@ -18,16 +19,17 @@ int main(int argc, char **argv)
     char line[256];
     bms_init(&bms, 0.5f, 1.0f, 1.0f, 0.0f, 0.0f);
     if (!fgets(line, sizeof line, fi)) return 1;                       /* başlık */
-    fprintf(fo, "soc,bias,innov,rej,tc,ts,ru,tv,iv,rr,state,i_dis,i_chg,psi,cause\n");
+    fprintf(fo, "soc,bias,innov,rej,tc,ts,ru,tv,iv,rr,state,i_dis,i_chg,psi,cause,psi_s,dom,kr,tdot\n");
     while (fgets(line, sizeof line, fi)) {
         float v[6];
         if (sscanf(line, "%f,%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6) continue;
         bms_in_t in = { v[0], v[1], v[2], v[3], v[4], v[5], 1 };
         bms_out_t o;
         bms_step(&bms, &in, &o);
-        fprintf(fo, "%.7g,%.7g,%.7g,%d,%.7g,%.7g,%.7g,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%d\n",
+        fprintf(fo, "%.7g,%.7g,%.7g,%d,%.7g,%.7g,%.7g,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%d,%.7g,%d,%.7g,%.7g\n",
                 o.soc, o.bias, o.innov, o.rejected, o.tc, o.ts, o.ru, o.t_valid, o.i_valid, o.rr,
-                o.dec.state, o.dec.i_allow_dis, o.dec.i_allow_chg, o.dec.psi, o.dec.cause);
+                o.dec.state, o.dec.i_allow_dis, o.dec.i_allow_chg, o.dec.psi, o.dec.cause,
+                o.dec.psi_s, o.dec.dom, o.kr, o.dec.tdot);
     }
     fclose(fi);  fclose(fo);
     return 0;

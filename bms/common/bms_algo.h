@@ -75,19 +75,25 @@ typedef struct {
     float i0_sum;
     uint8_t i0_ok, zero_bad;
     float i_dis, i_chg;
+    uint8_t td_on;                   /* Ψ_Tdot süzgeci başladı mı */
+    float t_f, tdot;                 /* süzülmüş yüzey T, artış hızı [°C/dk] */
 } decision_t;
+enum { PSI_T = 0, PSI_C, PSI_TDOT, PSI_H, PSI_N };   /* baskın kriter kodu = indeks + 1 (0 yok) */
 typedef struct {
     uint8_t  state;
-    float    i_allow_dis, i_allow_chg, psi;
+    float    i_allow_dis, i_allow_chg, psi;   /* psi: toplam kısıtlama 1 - I_allow/I_nom (0x202) */
     uint16_t cause;
+    float    psi_i[PSI_N], psi_s, tdot;       /* stres alt indeksleri, çok kriterli Ψ, dT/dt [°C/dk] */
+    uint8_t  dom;                             /* baskın kriter: 0 yok, 1 T, 2 C, 3 Tdot, 4 H */
 } decision_out_t;
 void decision_init(decision_t *d);
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   uint8_t T_anom, decision_out_t *o);
+                   uint8_t T_anom, float k_R, decision_out_t *o);
 /* cause bitleri: 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş,
- * 128 sert sınır, 256 termal anomali (0x201'de cause 8 bit: anomali bit 1'i de kurar) */
+ * 128 sert sınır, 256 termal anomali, 512 sıcaklık artış hızı, 1024 direnç artışı (0x201'de cause
+ * 8 bit: anomali ve artış hızı bit 1'i de kurar; direnç artışının 8 bitlik karşılığı yok) */
 
 /* ------------------------------------------------------------ ML: SOH ağacı */
 float soh_tree(float efc, float days, float T, float m, float dod, float rr);
@@ -100,7 +106,7 @@ typedef struct {            /* CAN'dan gelen ölçümler (0x101 / 0x102), fiziks
 typedef struct {
     float soc, bias, innov;
     uint8_t rejected;
-    float tc, ts, ru;
+    float tc, ts, ru, kr;            /* kr: EKF R0 ölçeği k_R */
     uint8_t t_valid, i_valid, t_anom;
     float rr;
     decision_out_t dec;

@@ -313,9 +313,41 @@ static uint8_t band(uint8_t f, float ratio)
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   uint8_t T_anom, decision_out_t *o)
+                   uint8_t T_anom, float k_R, decision_out_t *o)
 {
     const float I_nom_dis = 7.275f * BMS_NP, I_nom_chg = 3.395f * BMS_NP;
+
+    /* ---- çok kriterli stres indeksi (SAFE'te de hesaplanır: telemetri Ψ'yi her durumda gösterir) ---- */
+    if (Tc_hat >= DEC_T_DER_ON) d->therm_on = 1;
+    else if (Tc_hat < DEC_T_DER_OFF) d->therm_on = 0;
+    const float psi_T = d->therm_on ? clampf((Tc_hat - DEC_T_DER_OFF) / (DEC_T_DER_FULL - DEC_T_DER_OFF), 0.f, 1.f) : 0.0f;
+    if (d->n_run < DEC_N_COOL_BLANK) d->n_run++;
+    if (d->n_run < DEC_N_COOL_BLANK) d->cool_on = 0;          /* gözlemci yakınsıyor */
+    else if (Ru_hat > DEC_RU_ALARM) d->cool_on = 1;
+    else if (Ru_hat < DEC_RU_ALARM_OFF) d->cool_on = 0;
+    const float psi_C = d->cool_on ? DEC_PSI_COOL : 0.0f;
+    if (T_valid) {                           /* yüzey sıcaklığı artış hızı; sensör geçersizse yeniden başlar */
+        if (d->td_on) {
+            const float t_prev = d->t_f;
+            d->t_f += DEC_TD_A_F * (T_meas - d->t_f);
+            d->tdot += DEC_TD_A_R * (60.0f * (d->t_f - t_prev) / BMS_TS - d->tdot);
+        } else {
+            d->td_on = 1;  d->t_f = T_meas;  d->tdot = 0.0f;
+        }
+    } else {
+        d->td_on = 0;  d->tdot = 0.0f;
+    }
+    const float psi_D = DEC_PSI_TDOT * clampf((d->tdot - DEC_TDOT_ON) / (DEC_TDOT_FULL - DEC_TDOT_ON), 0.f, 1.f);
+    const float psi_H = DEC_PSI_HEALTH * clampf((k_R - DEC_KR_ON) / (DEC_KR_FULL - DEC_KR_ON), 0.f, 1.f);
+    o->psi_i[PSI_T] = psi_T;  o->psi_i[PSI_C] = psi_C;  o->psi_i[PSI_TDOT] = psi_D;  o->psi_i[PSI_H] = psi_H;
+    float pm = 0.0f, ps = 0.0f;
+    o->dom = 0;
+    for (int i = 0; i < PSI_N; i++) {       /* ilk en büyük (Python index() ile aynı) */
+        ps += o->psi_i[i];
+        if (o->psi_i[i] > pm) { pm = o->psi_i[i];  o->dom = (uint8_t)(i + 1); }
+    }
+    const float psi = minf(1.0f, pm + DEC_KAPPA * (ps - pm));
+    o->psi_s = psi;  o->tdot = d->tdot;
 
     /* ---- sert sınırlar (kilitlenir) ---- */
     d->n_lo = (V_min < DEC_V_SAFE_LO) ? d->n_lo + 1 : 0;
@@ -348,19 +380,8 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     const float i_ds_chg = interp_tab(DEC_T_CHG, DEC_I_CHG, DEC_DS_N, Ts_hat) * BMS_NP;
     d->f_ds = band(d->f_ds, minf(i_ds_dis / I_nom_dis, i_ds_chg / I_nom_chg));
 
-    /* ---- stres indeksi ---- */
-    if (Tc_hat >= DEC_T_DER_ON) d->therm_on = 1;
-    else if (Tc_hat < DEC_T_DER_OFF) d->therm_on = 0;
-    const float psi_T = d->therm_on ? clampf((Tc_hat - DEC_T_DER_OFF) / (DEC_T_DER_FULL - DEC_T_DER_OFF), 0.f, 1.f) : 0.0f;
-    if (d->n_run < DEC_N_COOL_BLANK) d->n_run++;
-    if (d->n_run < DEC_N_COOL_BLANK) d->cool_on = 0;          /* gözlemci yakınsıyor */
-    else if (Ru_hat > DEC_RU_ALARM) d->cool_on = 1;
-    else if (Ru_hat < DEC_RU_ALARM_OFF) d->cool_on = 0;
-    const float psi_C = d->cool_on ? DEC_PSI_COOL : 0.0f;
-    const float psi = maxf(psi_T, psi_C);
-
     /* ---- gerilim payı (SOP) ---- */
-    const float r0 = CELL_R0 * arrhenius(Tc_hat);
+    const float r0 = CELL_R0 * clampf(k_R, 1.0f, DEC_KR_SOP_MAX) * arrhenius(Tc_hat);   /* EKF direnç artışı */
     const float sop_dis = maxf(I_meas, 0.f) + DEC_K_SOP * BMS_NP * (V_min - DEC_V_LIM_DIS) / r0;
     const float sop_chg = maxf(-I_meas, 0.f) + DEC_K_SOP * BMS_NP * (DEC_V_LIM_CHG - V_max) / r0;
     const float r_dc = r0 + CELL_R1 * arrhenius_ea(CELL_EA_R1, Tc_hat) + CELL_R2 * arrhenius_ea(CELL_EA_R2, Tc_hat);
@@ -384,7 +405,8 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     }
     const uint16_t cause = (psi_T > 0.f || hot_ss ? 1 : 0) | (psi_C > 0.f ? 2 : 0) | (d->f_sop_dis ? 4 : 0)
                          | (d->f_sop_chg ? 8 : 0) | (d->f_ds ? 16 : 0) | (sensor_bad ? 32 : 0)
-                         | (empty ? 64 : 0) | (T_anom ? (256 | 1) : 0);
+                         | (empty ? 64 : 0) | (T_anom ? (256 | 1) : 0) | (psi_D > 0.f ? (512 | 1) : 0)
+                         | (psi_H > 0.f ? 1024 : 0);
 
     /* ---- durum + histerezis ---- */
     const uint8_t want = limp ? ST_LIMP : (cause ? ST_DERATE : ST_NORMAL);
@@ -442,10 +464,10 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
         b->th.x[2] = g_prev;
         if (o->t_valid) b->th.x[0] = maxf(b->th.x[0], in->T + DEC_K_SS * (in->T - in->T_amb));
     }
-    o->tc = b->th.x[0];  o->ts = b->th.x[1];  o->ru = 1.0f / b->th.x[2];
+    o->tc = b->th.x[0];  o->ts = b->th.x[1];  o->ru = 1.0f / b->th.x[2];  o->kr = b->ekf.x[4];
 
     o->rr = rint_step(&b->rint, in->I, in->V, o->tc, o->soc, o->i_valid);
 
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
-                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, &o->dec);
+                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, o->kr, &o->dec);
 }

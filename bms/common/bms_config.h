@@ -86,6 +86,19 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_T_DER_OFF   43.0f
 #define DEC_T_DER_FULL  55.0f
 #define DEC_PSI_COOL    0.3f
+/* çok kriterli stres indeksi: Ψ = min(1, Ψ_max + κ (ΣΨ_i - Ψ_max)), Ψ_i = [T C Tdot H] (2026-11-21;
+ * Python twin/decision.py, MATLAB decision_logic.m). Eşikler Monte Carlo sinyal taramasına göre
+ * varsayım (nominal: dT/dt en çok 2,3 °C/dk, k_R 0,89-1,10). */
+#define DEC_TD_A_F      0.02f       /* Ψ_Tdot: ölçülen yüzey T'nin 5 s alçak geçireni (ts/5) */
+#define DEC_TD_A_R      (1.0f / 300.0f)  /* artış hızının 30 s alçak geçireni (ts/30) */
+#define DEC_TDOT_ON     3.0f        /* [°C/dk] Ψ_Tdot başlar */
+#define DEC_TDOT_FULL   10.0f       /* [°C/dk] tavana ulaşır */
+#define DEC_PSI_TDOT    0.5f        /* Ψ_Tdot tavanı */
+#define DEC_KR_ON       1.2f        /* Ψ_H: EKF R0 ölçeği k_R */
+#define DEC_KR_FULL     1.6f
+#define DEC_PSI_HEALTH  0.3f        /* Ψ_H tavanı */
+#define DEC_KR_SOP_MAX  2.0f        /* SOP direnci R0 · clamp(k_R, 1, 2) · Arrhenius(T) */
+#define DEC_KAPPA       0.25f       /* toplama ağırlığı (0: eski max) */
 #define DEC_RU_ALARM    18.0f       /* [K/W] soğutma alarmı açılır (2 x nominal R_u) */
 #define DEC_RU_ALARM_OFF 15.0f      /* [K/W] altına inince kalkar (histerezis; kestirim eşik
                                        çevresinde yakınsarken alarm açılıp kapanıyordu) */

@@ -22,7 +22,7 @@ static float quant(float x, float lsb)
 }
 
 /* ---------------------------------------------------------------- senaryo üretimi */
-static const char *const FNAME[MC_F_N] = { "none", "cooling", "ext_heat", "ntc_open", "i_offset" };
+static const char *const FNAME[MC_F_N] = { "none", "cooling", "ext_heat", "ntc_open", "i_offset", "aged" };
 const char *mc_fault_name(uint8_t f) { return f < MC_F_N ? FNAME[f] : "?"; }
 
 void mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c)
@@ -45,6 +45,11 @@ void mc_config(uint32_t id, uint32_t base_seed, mc_cfg_t *c)
     if (c->fault == MC_F_OFFSET) {
         const float m = uni(4.0f, 12.0f);
         c->bias = urand() < 0.5f ? -m : m;
+    }
+    /* yaşlanma (stres indeksi Ψ_H'nin doğrulaması): çekilişler sonda, diğer senaryolar değişmez */
+    if (c->fault == MC_F_NONE && urand() < 0.4f) {
+        c->fault = MC_F_AGED;
+        c->kr *= uni(1.4f, 1.7f);                 /* R0, R1, R2 birlikte */
     }
     rng_seed(c->seed ^ 0xA5A5A5A5u);              /* ölçüm gürültüsü ayrı akış */
 }
@@ -71,14 +76,16 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     float i_dis = 0.0f, i_chg = 0.0f;
     r->min_soc = 2.0f;  r->max_tc = -99.0f;  r->soc_err = 0.0f;
     r->tc_limp = r->tc_safe = -99.0f;
-    r->t_limp = r->t_safe = r->t_cool = r->t_sens = r->t_anom = -1;
+    r->t_limp = r->t_safe = r->t_cool = r->t_sens = r->t_anom = r->t_tdot = r->t_health = -1;
+    r->psi_max = 0.0f;
     bms_out_t o = { 0 };
     int32_t tf = -1;                                  /* ilk arızalı örneğin zamanı [ms] */
 
     for (uint32_t k = 0; k < MC_STEPS; k++) {
         const float t = (float)k * dt;
         const int32_t t_ms = (int32_t)(k * 100u);
-        const uint8_t fault_on = c->fault != MC_F_NONE && c->fault != MC_F_OFFSET && t >= c->t_fault;
+        const uint8_t fault_on = c->fault != MC_F_NONE && c->fault != MC_F_OFFSET && c->fault != MC_F_AGED
+                                 && t >= c->t_fault;
         if (fault_on && tf < 0) tf = t_ms;
         /* ---- ikiz: akım talebi ECU izniyle kırpılır (closed_loop.py / twin_emu ile aynı) */
         float I = c->k_cur * cycle_i(t, c->cyc_off);
@@ -116,6 +123,9 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
         if ((o.dec.cause & 2u) && r->t_cool < 0) r->t_cool = t_ms;
         if ((o.dec.cause & 32u) && r->t_sens < 0) r->t_sens = t_ms;
         if ((o.dec.cause & 256u) && r->t_anom < 0) r->t_anom = t_ms;
+        if ((o.dec.cause & 512u) && r->t_tdot < 0) r->t_tdot = t_ms;
+        if ((o.dec.cause & 1024u) && r->t_health < 0) r->t_health = t_ms;
+        if (t >= 120.0f && o.dec.psi_s > r->psi_max) r->psi_max = o.dec.psi_s;
     }
     r->final_state = o.dec.state;
 
@@ -125,10 +135,21 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     r->react_ms = -1;
     r->why = "-";
     uint8_t ok = 1;
-    if (r->soc_err > 0.04f) { ok = 0; r->why = "soc_err"; }
+    /* yaşlanmış pakette SOC hatası hükme girmez (soc_err alanında raporlanır): EKF yalnız R0 ölçeğini
+     * kestirir, R1/R2 artışı modellenmez (1000 koşuluk taramada %9,7'ye kadar). Bu koşuların sınadığı
+     * şey stres indeksinin Ψ_H kriteri. */
+    if (c->fault != MC_F_AGED && r->soc_err > 0.04f) { ok = 0; r->why = "soc_err"; }
     switch (c->fault) {
-    case MC_F_NONE:
+    case MC_F_NONE:                       /* + stres indeksinin yeni kriterleri (Tdot, H) tetiklenmez */
         if (r->t_limp >= 0 || r->t_safe >= 0 || r->t_cool >= 0 || r->t_sens >= 0 || r->t_anom >= 0) { ok = 0; r->why = "false_alarm"; }
+        if (r->t_tdot >= 0 || r->t_health >= 0) { ok = 0; r->why = "false_stress"; }
+        break;
+    case MC_F_AGED:                       /* Ψ_H koşu içinde (600 s); LIMP/SAFE/sensör yok; tepki = Ψ_H zamanı.
+                                           * Soğutma alarmına izin var: gözlemcinin ısı modeli nominal R0
+                                           * kullanır, fazla ısıyı zayıf soğutma sanabilir (güvenli yön) */
+        r->react_ms = r->t_health;
+        if (r->t_health < 0) { ok = 0; r->why = "no_health"; }
+        if (r->t_limp >= 0 || r->t_safe >= 0 || r->t_sens >= 0) { ok = 0; r->why = "false_alarm"; }
         break;
     case MC_F_COOL:                       /* güvenlik: çekirdek 55 °C'yi aşmaz, SAFE yok; tepki = alarm */
         if (r->t_cool >= 0) r->react_ms = r->t_cool - tf;
@@ -199,7 +220,8 @@ uint32_t mc_line_rs(const mc_cfg_t *c, char *buf)
     p = p_str(p, " SOC0=");  p = p_fix(p, 100.0f * c->soc0, 0);
     p = p_str(p, " k=");  p = p_fix(p, c->k_cur, 2);
     p = p_str(p, " b=");  p = p_fix(p, c->bias, 1);
-    if (c->fault != MC_F_NONE && c->fault != MC_F_OFFSET) { p = p_str(p, " tf=");  p = p_fix(p, c->t_fault, 1); }
+    if (c->fault == MC_F_AGED) { p = p_str(p, " kr=");  p = p_fix(p, c->kr, 2); }
+    else if (c->fault != MC_F_NONE && c->fault != MC_F_OFFSET) { p = p_str(p, " tf=");  p = p_fix(p, c->t_fault, 1); }
     *p = 0;
     return (uint32_t)(p - buf);
 }

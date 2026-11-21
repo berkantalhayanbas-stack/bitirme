@@ -99,7 +99,9 @@ def summary(pc, stm):
     p("Plant: 19S12P digital twin (bms/sim/twin_model.c); ECU: bms_step (bms/common), same C code on both targets.")
     p("Randomized per run: T_amb 0-40 C, SOC0 35-95 %, drive severity x0.6-1.6, cycle offset, capacity +-2 %,")
     p("R +-5 %, current-sensor offset +-2.5 A; one fault (none 30 %, cooling 20 %, ext. heat 15 %, NTC open 15 %,")
-    p("large current offset 4-12 A 20 %) at a random time 60-480 s.")
+    p("large current offset 4-12 A 20 %) at a random time 60-480 s. 40 % of the fault-free runs are aged packs")
+    p("(resistance x1.4-1.7 from the start; expected: stress-index criterion H). Fault-free runs must not raise")
+    p("the new stress criteria (temperature-rise rate, resistance growth).")
     p()
     ref = stm if stm is not None else pc
     g = ref.groupby("fault")
@@ -147,8 +149,9 @@ def plot(ref, src):
     import thesis_style as ts                       # ortak tez figür stili
     ts.apply()
     fig, ax = plt.subplots(1, 3, figsize=(12.5, 3.9))
-    order = ["none", "cooling", "ext_heat", "ntc_open", "i_offset"]
-    col = {"none": ts.MUTED, "cooling": ts.BLUE, "ext_heat": ts.ORANGE, "ntc_open": ts.AQUA, "i_offset": ts.YELLOW}
+    order = ["none", "aged", "cooling", "ext_heat", "ntc_open", "i_offset"]
+    col = {"none": ts.MUTED, "aged": ts.VIOLET, "cooling": ts.BLUE,
+           "ext_heat": ts.ORANGE, "ntc_open": ts.AQUA, "i_offset": ts.YELLOW}
     # (a) PASS oranı
     g = ref.groupby("fault")
     n = g.size().reindex(order).fillna(0)
@@ -167,9 +170,9 @@ def plot(ref, src):
             ax[1].scatter(np.full(len(v), i) + np.random.default_rng(0).uniform(-0.25, 0.25, len(v)), v.clip(lower=0.05),
                           s=8, color=col[o], alpha=0.6)
     ax[1].set_yscale("log")
-    ax[1].set_xticks(range(4), order[1:], fontsize=8, rotation=20)
-    ax[1].set_ylabel("reaction time after fault [s]")
-    ax[1].text(2, 0.07, "same sample (0 s)", ha="center", fontsize=7.5)
+    ax[1].set_xticks(range(len(order) - 1), order[1:], fontsize=8, rotation=20)
+    ax[1].set_ylabel("reaction time after fault [s]\n(aged: after start)")
+    ax[1].text(order.index("ntc_open") - 1, 0.07, "same sample (0 s)", ha="center", fontsize=7.5)
     ax[1].set_title("(b) reaction time (log)", loc="left", fontsize=9)
     # (c) dış ısı: LIMP / SAFE anında gerçek çekirdek sıcaklığı (ECU yüzeyi ölçer, çekirdeği kestirir)
     h = ref[ref.fault == "ext_heat"]

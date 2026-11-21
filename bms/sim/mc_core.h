@@ -19,7 +19,9 @@
 #include "bms_algo.h"
 
 #define MC_STEPS   6000u        /* 600 s, Ts = 0,1 s */
-enum { MC_F_NONE, MC_F_COOL, MC_F_HEAT, MC_F_NTC, MC_F_OFFSET, MC_F_N };
+/* MC_F_AGED: yaşlanmış paket (direnç x1,4-1,7, baştan); arızasız koşuların ~%40'ından seçilir,
+ * diğer senaryoların çekilişleri değişmez. Beklenen: stres indeksinin Ψ_H kriteri (neden 1024). */
+enum { MC_F_NONE, MC_F_COOL, MC_F_HEAT, MC_F_NTC, MC_F_OFFSET, MC_F_AGED, MC_F_N };
 
 typedef struct {
     uint32_t id, seed;
@@ -35,6 +37,8 @@ typedef struct {
     float    tc_limp, tc_safe;           /* LIMP / SAFE anında gerçek çekirdek sıcaklığı (-99 = yok) */
     int32_t  t_limp, t_safe, t_cool, t_sens;   /* ilk LIMP / SAFE / soğutma alarmı / sensör nedeni [ms], -1 yok */
     int32_t  t_anom;                     /* ilk termal anomali (neden 256) [ms], -1 yok */
+    int32_t  t_tdot, t_health;           /* ilk Ψ_Tdot (512) / Ψ_H (1024) nedeni [ms], -1 yok */
+    float    psi_max;                    /* en büyük çok kriterli Ψ (120 s sonra) */
     const char *why;                     /* FAIL nedeni (PASS'te "-") */
 } mc_res_t;
 
