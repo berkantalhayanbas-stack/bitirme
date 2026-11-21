@@ -14,6 +14,10 @@ function db_file(): string {
     return $local . '/bms.sqlite';
 }
 
+// geniş satır kolonları: kolon => SQLite tipi (gateway alan adı api.php'de)
+const TELEMETRY_X = ['cause' => 'INTEGER', 'ts' => 'REAL', 'i_chg' => 'REAL', 'psi' => 'REAL', 'i_meas' => 'REAL',
+                     'v_pack' => 'REAL', 't_meas' => 'REAL', 'v_min' => 'REAL', 'v_max' => 'REAL'];
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
@@ -22,6 +26,11 @@ function db(): PDO {
                         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
         $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;');
         $pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));     // CREATE TABLE IF NOT EXISTS
+        // eski telemetry tablosuna geniş satır (DX) kolonlarını ekle (schema.sql ile aynı liste)
+        $have = array_column($pdo->query('PRAGMA table_info(telemetry)')->fetchAll(), 'name');
+        foreach (TELEMETRY_X as $c => $t) {
+            if (!in_array($c, $have, true)) $pdo->exec("ALTER TABLE telemetry ADD COLUMN $c $t");
+        }
     }
     return $pdo;
 }

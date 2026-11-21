@@ -9,7 +9,8 @@ STM32 (LPUART1, COM9) --UART--> gateway.py (PC) --HTTPS POST--> server/api.php -
 - **Canlı ECU:** `python tools/fw_build.py --app 4 --define BMS_SAFETY=1 --define BMS_OUTPUTS=1 --define BMS_TELEMETRY=1 --crc-ref --flash`
   - 10 Hz `D,<t_ms>,0,<soc>,<soh>,<Tc>,<I_allow>,<state>,<tec>,<rec>` satırları gelir; durum kodları 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP.
   - Değişimlerde `E,<t_ms>,0,<code>,<detail>` olayları gelir: BOOT, durum adları, THERMAL_DERATE, COOLING_ALARM, SOP_*, DATASHEET_T_LIMIT, SENSOR_FAULT, SOC_EMPTY, CAN_TIMEOUT, CONTACTOR_OPEN/CLOSE.
-  - `BMS_TELEMETRY=2` ayrıca `tools/live_panel.py` için geniş `DX,...` satırını ekler.
+  - `BMS_TELEMETRY=2` ayrıca geniş `DX,...` satırını ekler (`tools/live_panel.py` ve gateway). Gateway DX'i aynı adımın D satırına ekler (`t_ms` eşleşmesi); panel ölçülen akımı, paket gerilimini, min/maks grup gerilimini, yüzey ve ölçülen sıcaklığı, şarj I_allow'u, ψ'yi ve neden bitlerini ancak bununla gösterir (=1'de bu alanlar boş, panel uyarı yazar). Panel için önerilen: `--define BMS_TELEMETRY=2`.
+  - Sunucu: geniş alanlar `telemetry` tablosunun ek kolonlarıdır (`schema.sql`); eski veritabanına `config.php` `db()` ilk istekte `ALTER TABLE` ile ekler (`TELEMETRY_X`). `data.php?q=linkhist` yığın başına RTT verir (panel grafiği).
 - **Senaryo merkezi (Monte Carlo):** `python tools/fw_build.py --app 8 --define MC_N=200 --define MC_AUTO=0 --flash`
   - Gateway penceresine `RUN <id>`, `ALL [n]` ya da `STOP` yazılır.
   - Her koşu `RS`/`RE` satırı üretir. İzli koşular (her `MC_TRACE_EVERY`. koşu ve `RUN`) 1 Hz `D` satırları gönderir; `run` alanı koşu numarasıdır.
@@ -24,9 +25,23 @@ python tools/web/gateway.py COM9
 - Adres `BMS_URL` ile değiştirilebilir; varsayılan `https://hizlipdf.net/bitirmeprj/api.php`.
 - İnternet yoksa gönderilecekler `build/web/spool.jsonl` dosyasında kuyruğa alınır. Ham satırlar `build/web/log_*.txt` dosyasına yazılır.
 
+## Bağlantı kalitesi (gecikme, kayıp)
+Ölçüm gateway'de yapılır; ECU yazılımı değişmez (D satırındaki `t_ms` yeterli).
+- **UART kaybı:** aynı run'da ardışık `t_ms` farkı, görülen en küçük periyodun 1,5 katını aşarsa aradaki satırlar eksik sayılır. 1 s'den uzun boşluk kayıp sayılmaz (ECU duraklaması: ECU adımı ölçüm çiftiyle atar; EMU sıfırlanınca ya da hat kopunca satır da gelmez). İlk sürüm bunu da sayıyordu: senaryo denemesinde (COM10 açılışı Uno'yu ~2 s susturur) %1,2 "kayıp" görünmüştü. `D,` ile başlayıp ayrıştırılamayan satır bozuk sayılır.
+- **UART titreşimi** (yalnız canlı mod, run 0): PC alış zamanı ile `t_ms` farkının son 5 s'deki en küçüğünden sapması. İlk sürüm oturumun en küçüğünü alıyordu; ECU ile PC saati arasında ~0,5 ms/s kayma olduğu için (2026-11-21, kartta) değer zamanla doğrusal büyüyüp 20 dakikada ~535 ms'ye çıktı, bu titreşim değil saat kaymasıydı.
+- **Upload RTT** ve **uçtan uca gecikme** (satırın UART'tan alınması → sunucu onayı): ikisi de PC saatiyle ölçülür, iki saat eşlemesi gerekmez. Uçtan uca gecikmenin ~1 s'si 1 s'lik yığınlamadan gelir (tasarım gereği).
+- Her yığına `meta` eklenir. `api.php` bunu `link` tablosuna yazar; `seq` en son kabul edilenden büyük değilse yığını **tekrar oynatma** sayıp 409 ile reddeder. `meta`'sız istemci (`arduino/esp_gateway`) yine kabul edilir.
+- Çıktılar: `build/web/link_*.csv` (yığın başına satır), Ctrl+C ya da port kapanınca özet (p50/p95/max), panelde "Link quality (last 5 min)" kartı (`data.php?q=link&min=5`).
+- Yerel deneme (2026-11-21, sahte UART + mock sunucu, 200 satır, bilinen 3 kayıp + 1 bozuk): sayaçlar birebir tuttu; 4 s sunucu kesintisinde 197 satırın hepsi kuyruktan yeniden gönderildi, hiçbiri reddedilmedi; aynı `seq` ile tekrar → 409.
+- Gerçek sunucu (2026-11-21, hizlipdf.net, sahte UART 10 Hz, 300 satır, bilinen 3 kayıp + 1 bozuk): 296/296 satır ulaştı, kayıp 4 (bozuk satır da `t_ms` boşluğu açar) = %1,333, bozuk 1; upload RTT p50/p95 98/157 ms, uçtan uca 1154/1248 ms, titreşim p95 1 ms. Tekrar `seq` → 409, meta'sız → 200, yanlış anahtar → 401. `oneway_p50` -959 ms çıktı: PC saati NTP'siz (Local CMOS) ve sunucudan ~1 s ileride; bu yüzden esas ölçüt RTT ve uçtan uca gecikmedir.
+
+## Panel
+- **Overview** (varsayılan): sürücü ekranı gibi az ve büyük. Durum sade dille ("Power limited — because the battery is warm"), şarj, güç ölçeri (açık şerit = BMS'in izin verdiği, koyu = kullanılan; sol şarj, sağ sürüş; ölçek veri sayfası nominali 87,3 / 40,7 A), çekirdek sıcaklığı 45 / 55 / 60 °C bölgeleriyle, hücre dengesi, son 1 dk güç eğrisi, son uyarılar, bağlantı özeti.
+- **Engineering**: ham değerler, durum şeridi, akım / sıcaklık / gerilim / SOC grafikleri (1 / 5 dk), CSV, bağlantı ayrıntısı, senaryo merkezi.
+
 ## Sunucu (paylaşımlı hosting, PHP + SQLite)
 Veritabanı kurulumu gerekmez. PHP ilk istekte SQLite dosyasını kendisi oluşturur: tercihen web kökünün dışında `~/bitirmeprj_data/bms.sqlite`, olmazsa `data/` alt klasöründe, dışarıya kapalı. Tek gizli ayar `config.php` içindeki `API_KEY`'dir ve gateway'deki anahtarla aynı olmalıdır.
-1. Paketi hazırla (anahtar yoksa üretir, `config.php`'yi yazar; ikisi de git dışıdır): `build/web/bitirmeprj_upload.zip`
+1. Paketi hazırla: `python tools/web/make_upload.py` → `build/web/bitirmeprj_upload.zip` (anahtar yoksa üretir, `config.php`'yi `config.sample.php`'den yazar; ikisi de git dışıdır).
 2. cPanel > File Manager > `public_html/bitirmeprj/` > Upload > zip'i seç > zip'e sağ tık > Extract > zip'i sil.
 3. Kontrol: `https://hizlipdf.net/bitirmeprj/data.php?q=ping` -> `{"ok":true,...}`
    - `.htaccess`, sitenin `.php` uzantısını kaldıran 301 yönlendirmesini bu klasörde kapatır (301, POST'u GET'e çevirir).

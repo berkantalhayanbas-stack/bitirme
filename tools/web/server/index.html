@@ -3,144 +3,626 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EV BMS — Live Telemetry & Scenario Test Center</title>
+<title>EV BMS Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-  :root { --bg:#0f1115; --card:#181b22; --fg:#e6e8eb; --mut:#8a93a3; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; }
+  /* renkler: dataviz paleti (tools/thesis_style.py ile aynı sıra), durum renkleri yalnız durum için */
+  :root {
+    --page:#f9f9f7; --card:#fcfcfb; --fg:#0b0b0b; --fg2:#52514e; --mut:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+    --ring:rgba(11,11,11,.10); --hover:#f0efec;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b; --none:#c3c2b7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme:dark;
+      --page:#0d0d0d; --card:#1a1a19; --fg:#f0efec; --fg2:#c3c2b7; --grid:#2c2c2a; --axis:#383835;
+      --ring:rgba(255,255,255,.10); --hover:#242423;
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --none:#383835;
+    }
+  }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:14px 18px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  h1 { font-size:18px; margin:0; font-weight:600; }
-  #conn { font-size:12px; color:var(--mut); }
-  .grid { display:grid; gap:12px; padding:0 18px 18px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
-  .card { background:var(--card); border-radius:10px; padding:14px; }
-  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  .kpi b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
-  .kpi span { font-size:12px; color:var(--mut); }
-  .state { display:inline-block; padding:6px 12px; border-radius:6px; font-weight:700; }
-  .s0 { background:#3a3f4b; } .s1 { background:var(--ok); color:#000; } .s2 { background:var(--warn); color:#000; }
-  .s3 { background:#e67e22; color:#000; } .s4 { background:var(--bad); }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--page); color:var(--fg); }
+  header { padding:14px 16px 10px; display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; font-weight:650; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:6px; font-weight:700; font-size:14px;
+           background:var(--none); color:#fff; }
+  .badge.s1 { background:var(--good); } .badge.s2 { background:var(--warning); color:#0b0b0b; }
+  .badge.s3 { background:var(--serious); } .badge.s4 { background:var(--critical); }
+  .chip { font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid var(--ring); color:var(--fg2); }
+  #fresh { font-size:12px; color:var(--fg2); font-variant-numeric:tabular-nums; }
+  #fresh.stale { color:var(--critical); font-weight:600; }
+  .spacer { flex:1; }
+  .ctrl { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--fg2); }
+  .seg button, .btn { font:inherit; font-size:12px; padding:4px 10px; border:1px solid var(--ring); background:var(--card);
+           color:var(--fg); border-radius:6px; cursor:pointer; }
+  .seg button[aria-pressed="true"] { background:var(--fg); color:var(--card); }
+  .grid { display:grid; gap:12px; padding:0 16px 16px; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); }
+  .card { background:var(--card); border:1px solid var(--ring); border-radius:10px; padding:14px; min-width:0; }
+  .wide { grid-column:1/-1; }
+  h2 { font-size:13px; margin:0 0 10px; color:var(--fg2); font-weight:600; }
+  h2 small { font-weight:400; color:var(--mut); }
+  .kpis { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); }
+  .kpi b { display:block; font-size:21px; font-weight:650; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .kpi span { font-size:11.5px; color:var(--fg2); }
+  .plot { position:relative; height:220px; }
+  .note { font-size:12px; color:var(--fg2); margin:8px 0 0; }
+  #wide_hint { display:none; }
+  .strip { width:100%; height:30px; display:block; border-radius:4px; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--fg2); margin-top:6px; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #262a33; }
-  tr.click { cursor:pointer; } tr.click:hover { background:#20242d; }
-  .PASS { color:var(--ok); } .FAIL { color:var(--bad); } .RUNNING { color:var(--warn); }
-  h2 { font-size:14px; margin:0 0 10px; color:var(--mut); font-weight:600; }
-  canvas { max-height:240px; }
-  ul { margin:0; padding-left:18px; font-size:13px; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--grid); }
+  th { color:var(--fg2); font-weight:600; }
+  tr.click { cursor:pointer; } tr.click:hover { background:var(--hover); }
+  .res::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--none); }
+  .res.PASS::before { background:var(--good); } .res.FAIL::before { background:var(--critical); } .res.RUNNING::before { background:var(--warning); }
+  .tblwrap { overflow-x:auto; }
+  ul.ev { margin:0; padding:0; list-style:none; font-size:13px; max-height:260px; overflow:auto; }
+  ul.ev li { padding:4px 0; border-bottom:1px solid var(--grid); display:flex; gap:8px; }
+  ul.ev time { color:var(--mut); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; margin-top:5px; background:var(--axis); }
+
+  /* ---- sekmeler */
+  .tabs { display:flex; background:var(--grid); border-radius:8px; padding:3px; }
+  .tabs button { font:inherit; font-size:13px; border:0; background:none; color:var(--fg2); padding:5px 14px; border-radius:6px; cursor:pointer; }
+  .tabs button[aria-selected="true"] { background:var(--card); color:var(--fg); box-shadow:0 0 0 1px var(--ring); }
+  .live { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--axis); margin-right:6px; vertical-align:0; }
+  #fresh.on .live { background:var(--good); }
+  #fresh.stale .live { background:var(--critical); }
+  .toolbar { display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; padding:0 16px 12px; }
+  .muted { color:var(--mut); font-weight:400; }
+
+  /* ---- Overview: büyük, az, okunur */
+  #ov { max-width:1100px; margin:0 auto; padding:0 16px 24px; display:grid; gap:14px; }
+  .banner { display:flex; gap:14px; align-items:center; padding:16px 18px; border-radius:12px; background:var(--card);
+            border:1px solid var(--ring); border-left:6px solid var(--none); }
+  .banner b { display:block; font-size:20px; font-weight:650; }
+  .banner span#b_text { display:block; font-size:14px; color:var(--fg2); margin-top:2px; }
+  .banner .ico { width:36px; height:36px; flex:none; border-radius:50%; display:grid; place-items:center; font-weight:800;
+                 font-size:18px; color:#fff; background:var(--none); }
+  .banner.s1 { border-left-color:var(--good); }     .banner.s1 .ico { background:var(--good); }
+  .banner.s2 { border-left-color:var(--warning); }  .banner.s2 .ico { background:var(--warning); color:#0b0b0b; }
+  .banner.s3 { border-left-color:var(--serious); }  .banner.s3 .ico { background:var(--serious); }
+  .banner.s4 { border-left-color:var(--critical); } .banner.s4 .ico { background:var(--critical); }
+  .ovgrid { display:grid; gap:14px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  @media (max-width:920px) { .ovgrid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width:520px) { .ovgrid { grid-template-columns:1fr; } .big { font-size:38px; } }
+  .ovgrid.two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  @media (max-width:720px) { .ovgrid.two { grid-template-columns:1fr; } }
+  .tile { background:var(--card); border:1px solid var(--ring); border-radius:12px; padding:16px 18px; min-width:0; }
+  .tile h3 { margin:0 0 6px; font-size:13px; font-weight:600; color:var(--fg2); }
+  .big { font-size:44px; font-weight:650; line-height:1.1; font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+  .big small { font-size:16px; font-weight:500; color:var(--fg2); margin-left:4px; letter-spacing:0; }
+  .cap { margin:8px 0 0; font-size:13px; color:var(--fg2); }
+  .batt { height:14px; border-radius:7px; background:var(--grid); margin-top:12px; overflow:hidden; }
+  .batt div { height:100%; width:0; background:var(--s1); border-radius:7px; transition:width .6s; }
+  /* güç ölçeri: sol şarj, sağ sürüş; açık şerit = BMS'in izin verdiği, koyu = kullanılan */
+  .meter { display:flex; height:14px; margin-top:12px; gap:2px; }
+  .meter .side { position:relative; background:var(--grid); overflow:hidden; }
+  .meter .chg { flex:0 0 32%; border-radius:7px 0 0 7px; } .meter .dis { flex:1; border-radius:0 7px 7px 0; }
+  .meter .av, .meter .use { position:absolute; top:0; bottom:0; transition:width .4s; }
+  .meter .chg .av, .meter .chg .use { right:0; } .meter .dis .av, .meter .dis .use { left:0; }
+  .meter .av { background:color-mix(in srgb, var(--s1) 35%, transparent); }
+  .meter .use { background:var(--s1); }
+  .mscale { position:relative; display:flex; justify-content:space-between; font-size:11px; color:var(--mut); margin-top:4px; }
+  .mscale span:nth-child(2) { position:absolute; left:32%; transform:translateX(-50%); }
+  /* sıcaklık ölçeği 0-65 °C; bölgeler eşiklerde (45 / 55 / 60) */
+  .tscale { position:relative; height:14px; margin-top:12px; border-radius:7px; background:linear-gradient(90deg,
+            var(--grid) 0 69.2%, color-mix(in srgb, var(--warning) 55%, var(--grid)) 69.2% 84.6%,
+            color-mix(in srgb, var(--serious) 65%, var(--grid)) 84.6% 92.3%, color-mix(in srgb, var(--critical) 70%, var(--grid)) 92.3%); }
+  .tscale .mk { position:absolute; top:-4px; width:4px; height:22px; border-radius:2px; background:var(--fg); left:0;
+                box-shadow:0 0 0 2px var(--card); transition:left .6s; }
+  .tticks { position:relative; height:14px; font-size:11px; color:var(--mut); margin-top:4px; }
+  .tticks span { position:absolute; transform:translateX(-50%); }
+  ul.alerts { list-style:none; margin:0; padding:0; font-size:14px; }
+  ul.alerts li { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--grid); }
+  ul.alerts li:last-child { border-bottom:0; }
+  ul.alerts time { color:var(--mut); font-variant-numeric:tabular-nums; flex:none; width:64px; }
+  .conn { margin:0; font-size:14px; line-height:1.7; color:var(--fg2); }
+  .conn b { color:var(--fg); font-weight:600; }
 </style>
 </head>
 <body>
 <header>
-  <h1>EV BMS — Live Telemetry</h1>
-  <span id="state" class="state s0">—</span>
-  <span id="conn">connecting…</span>
+  <h1>Battery</h1>
+  <span id="fresh"><i class="live"></i>connecting…</span>
+  <span class="spacer"></span>
+  <nav class="tabs" id="tabs">
+    <button data-v="ov" aria-selected="true">Overview</button><button data-v="eng" aria-selected="false">Engineering</button>
+  </nav>
 </header>
 
+<!-- sürücü görünümü: araç gösterge ekranı gibi az ve büyük; ayrıntı Engineering sekmesinde -->
+<main id="ov">
+  <div class="banner" id="banner"><span class="ico" id="b_ico">·</span><div><b id="b_title">Waiting for data</b><span id="b_text"></span></div></div>
+  <div class="ovgrid">
+    <section class="tile">
+      <h3>Charge</h3>
+      <div class="big"><span id="o_soc">—</span><small>%</small></div>
+      <div class="batt" aria-hidden="true"><div id="o_socbar"></div></div>
+      <p class="cap" id="o_soc_cap">&nbsp;</p>
+    </section>
+    <section class="tile">
+      <h3 id="o_pw_h">Power</h3>
+      <div class="big"><span id="o_pw">—</span><small>kW</small></div>
+      <div class="meter" aria-hidden="true">
+        <div class="side chg"><div class="av" id="o_avc"></div><div class="use" id="o_usec"></div></div>
+        <div class="side dis"><div class="av" id="o_avd"></div><div class="use" id="o_used"></div></div>
+      </div>
+      <div class="mscale"><span>◀ charge</span><span>0</span><span>drive ▶</span></div>
+      <p class="cap" id="o_pw_cap">&nbsp;</p>
+    </section>
+    <section class="tile">
+      <h3>Battery temperature</h3>
+      <div class="big"><span id="o_t">—</span><small>°C</small></div>
+      <div class="tscale" aria-hidden="true"><div class="mk" id="o_tmk"></div></div>
+      <div class="tticks" id="o_tticks"></div>
+      <p class="cap" id="o_t_cap">&nbsp;</p>
+    </section>
+    <section class="tile">
+      <h3>Cell balance</h3>
+      <div class="big"><span id="o_dv">—</span><small>mV</small></div>
+      <p class="cap" id="o_dv_cap">&nbsp;</p>
+      <p class="cap" id="o_soh_cap">&nbsp;</p>
+    </section>
+  </div>
+  <section class="tile">
+    <h3>Power used and available <span class="muted">· last minute</span></h3>
+    <div class="plot" style="height:200px"><canvas id="c_pow"></canvas></div>
+  </section>
+  <div class="ovgrid two">
+    <section class="tile"><h3>Recent alerts</h3><ul class="alerts" id="alerts"><li class="muted">None</li></ul></section>
+    <section class="tile"><h3>Connection</h3><p class="conn" id="o_link">—</p></section>
+  </div>
+</main>
+
+<div id="eng" hidden>
+<div class="toolbar">
+  <span id="state" class="badge">—</span>
+  <span id="causes"></span>
+  <span class="spacer"></span>
+  <span class="ctrl">Window
+    <span class="seg" id="win">
+      <button data-s="60" aria-pressed="true">1 min</button><button data-s="300">5 min</button>
+    </span>
+  </span>
+  <button class="btn" id="csv" title="Download the buffered live data as CSV">CSV</button>
+</div>
 <div class="grid">
-  <div class="card">
-    <h2>Live values</h2>
+  <div class="card wide">
+    <h2>Live values <small id="kpi_t"></small></h2>
     <div class="kpis">
       <div class="kpi"><b id="k_soc">—</b><span>SOC (%)</span></div>
+      <div class="kpi"><b id="k_v">—</b><span>Pack voltage (V)</span></div>
+      <div class="kpi"><b id="k_i">—</b><span>Current (A, + discharge)</span></div>
+      <div class="kpi"><b id="k_p">—</b><span>Power (kW)</span></div>
+      <div class="kpi"><b id="k_ia">—</b><span>I_allow dis / chg (A)</span></div>
+      <div class="kpi"><b id="k_psi">—</b><span>Derating ψ (%)</span></div>
+      <div class="kpi"><b id="k_tc">—</b><span>Core / surface est. (°C)</span></div>
+      <div class="kpi"><b id="k_tm">—</b><span>Measured temp. (°C)</span></div>
+      <div class="kpi"><b id="k_vg">—</b><span>Group V min / max (V)</span></div>
+      <div class="kpi"><b id="k_dv">—</b><span>Group spread (mV)</span></div>
       <div class="kpi"><b id="k_soh">—</b><span>SOH (%)</span></div>
-      <div class="kpi"><b id="k_T">—</b><span>Core temp. est. (°C)</span></div>
-      <div class="kpi"><b id="k_I">—</b><span>I_allow (A)</span></div>
-      <div class="kpi"><b id="k_tec">—</b><span>CAN TEC / REC</span></div>
-      <div class="kpi"><b id="k_run">—</b><span>Run ID</span></div>
+      <div class="kpi"><b id="k_can">—</b><span>CAN TEC / REC</span></div>
+    </div>
+    <p class="note" id="wide_hint">Only the basic fields are arriving. Measured current, voltages and surface temperature need the ECU built with BMS_TELEMETRY=2.</p>
+  </div>
+
+  <div class="card wide">
+    <h2>State timeline <small id="strip_info">hover for details</small></h2>
+    <canvas id="strip" class="strip"></canvas>
+    <div class="legend" id="st_legend"></div>
+  </div>
+
+  <div class="card"><h2>Current vs. allowed current (A)</h2><div class="plot"><canvas id="c_cur"></canvas></div></div>
+  <div class="card"><h2>Temperatures (°C)</h2><div class="plot"><canvas id="c_tmp"></canvas></div></div>
+  <div class="card"><h2>Group voltage, min and max (V)</h2><div class="plot"><canvas id="c_v"></canvas></div></div>
+  <div class="card"><h2>State of charge (%)</h2><div class="plot"><canvas id="c_soc"></canvas></div></div>
+
+  <div class="card"><h2>Recent events</h2><ul class="ev" id="events"></ul></div>
+  <div class="card">
+    <h2>Link quality <small>last 5 min</small></h2>
+    <div class="kpis">
+      <div class="kpi"><b id="l_rtt">—</b><span>Upload RTT p50 / p95 (ms)</span></div>
+      <div class="kpi"><b id="l_age">—</b><span>UART → server p50 / p95 (ms)</span></div>
+      <div class="kpi"><b id="l_loss">—</b><span>UART line loss (%)</span></div>
+      <div class="kpi"><b id="l_jit">—</b><span>UART jitter p95 (ms)</span></div>
+      <div class="kpi"><b id="l_bad">—</b><span>Corrupt lines / resent</span></div>
+      <div class="kpi"><b id="l_n">—</b><span>Batches / rows</span></div>
+    </div>
+    <h2 style="margin-top:14px">Upload RTT per batch (ms)</h2>
+    <div class="plot" style="height:150px"><canvas id="c_rtt"></canvas></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Scenario test center</h2>
+    <div id="sum" class="note" style="margin:0 0 8px"></div>
+    <div class="tblwrap"><table><thead><tr><th>ID</th><th>Scenario</th><th>Result</th><th>Duration (s)</th><th>Summary</th></tr></thead>
+    <tbody id="runs"></tbody></table></div>
+  </div>
+  <div class="card wide" id="detail" style="display:none">
+    <h2 id="dtitle">Run</h2>
+    <canvas id="d_strip" class="strip"></canvas>
+    <div class="grid" style="padding:10px 0 0">
+      <div><h2>SOC (%)</h2><div class="plot" style="height:180px"><canvas id="d_soc"></canvas></div></div>
+      <div><h2>Core temperature est. (°C)</h2><div class="plot" style="height:180px"><canvas id="d_tmp"></canvas></div></div>
+      <div><h2>I_allow discharge (A)</h2><div class="plot" style="height:180px"><canvas id="d_ia"></canvas></div></div>
     </div>
   </div>
-  <div class="card"><h2>SOC & SOH (%)</h2><canvas id="c1"></canvas></div>
-  <div class="card"><h2>Core temperature est. (°C) &amp; I_allow (A)</h2><canvas id="c2"></canvas></div>
-  <div class="card"><h2>Recent events</h2><ul id="events"></ul></div>
-  <div class="card" style="grid-column:1/-1">
-    <h2>Scenario test center</h2>
-    <div id="sum" style="font-size:13px;margin-bottom:8px;color:var(--mut)"></div>
-    <table><thead><tr><th>ID</th><th>Scenario</th><th>Result</th><th>Duration (s)</th><th>Summary</th></tr></thead>
-    <tbody id="runs"></tbody></table>
-  </div>
-  <div class="card" style="grid-column:1/-1;display:none" id="detail">
-    <h2 id="dtitle">Run</h2><canvas id="c3"></canvas>
-  </div>
+</div>
 </div>
 
 <script>
 // ECU durum kodları (bms_algo.h): 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP
 const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
+// neden bitleri (bms_algo.h): 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş, 128 sert sınır, 256 anomali
+const CAUSES = [[1, 'Thermal derate'], [2, 'Cooling alarm'], [4, 'SOP discharge'], [8, 'SOP charge'], [16, 'Datasheet T limit'],
+                [32, 'Sensor fault'], [64, 'SOC empty'], [128, 'Hard limit'], [256, 'Thermal anomaly']];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = Object.fromEntries(['fg', 'fg2', 'mut', 'grid', 'axis', 'card', 's1', 's2', 's3', 's4',
+                              'good', 'warning', 'serious', 'critical', 'none'].map(k => [k, css('--' + k)]));
+const ST_COL = [C.none, C.good, C.warning, C.serious, C.critical];
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => location.reload());   // tema değişti: renkleri yeniden oku
+
 // cihazdan gelen metin (olay ayrıntısı, senaryo adı) HTML olarak yorumlanmasın
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const MAXP = 600;
-let lastId = 0, lastRun = null;      // kaynak (canlı run 0 / Monte Carlo koşusu) değişince grafik sıfırlanır
-const clear = ch => { ch.data.labels = []; ch.data.datasets.forEach(d => d.data = []); };
-const opt = { animation:false, responsive:true, plugins:{ legend:{ labels:{ color:'#e6e8eb' } } },
-  scales:{ x:{ ticks:{ color:'#8a93a3', maxTicksLimit:6 } }, y:{ ticks:{ color:'#8a93a3' } }, y2:{ position:'right', ticks:{ color:'#8a93a3' }, grid:{ display:false } } },
-  elements:{ point:{ radius:0 } } };
-const mk = (id, ds) => new Chart(document.getElementById(id), { type:'line', data:{ labels:[], datasets:ds }, options:opt });
-const c1 = mk('c1', [{ label:'SOC', data:[], borderColor:'#3498db' }, { label:'SOH', data:[], borderColor:'#9b59b6' }]);
-const c2 = mk('c2', [{ label:'T', data:[], borderColor:'#e67e22' }, { label:'I_allow', data:[], borderColor:'#1abc9c', yAxisID:'y2' }]);
-const c3 = mk('c3', [{ label:'SOC', data:[], borderColor:'#3498db' }, { label:'T', data:[], borderColor:'#e67e22' },
-                     { label:'I_allow', data:[], borderColor:'#1abc9c', yAxisID:'y2' }, { label:'State', data:[], borderColor:'#e74c3c', stepped:true, yAxisID:'y2' }]);
 const $ = id => document.getElementById(id);
+const num = v => v == null ? null : +v;
 const f = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
+const causeText = c => c == null ? null : CAUSES.filter(([b]) => c & b).map(([, t]) => t);
+const utc = s => Date.parse(String(s).replace(' ', 'T') + 'Z');      // sunucu zamanı UTC
 
-function push(ch, label, vals) {
-  ch.data.labels.push(label);
-  vals.forEach((v, i) => ch.data.datasets[i].data.push(v));
-  if (ch.data.labels.length > MAXP) { ch.data.labels.shift(); ch.data.datasets.forEach(d => d.data.shift()); }
+// ---------------------------------------------------------------- Chart.js eklentileri
+// eşik çizgileri (kesikli, soluk) + etiket
+const refPlugin = { id: 'ref', afterDatasetsDraw(ch) {
+  const L = ch.options.plugins.ref?.lines; if (!L) return;
+  const { ctx, chartArea: A, scales: { y } } = ch;
+  ctx.save(); ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.strokeStyle = C.mut; ctx.fillStyle = C.fg2; ctx.font = '11px system-ui';
+  for (const l of L) {
+    const py = y.getPixelForValue(l.v); if (py < A.top || py > A.bottom) continue;
+    ctx.beginPath(); ctx.moveTo(A.left, py); ctx.lineTo(A.right, py); ctx.stroke(); ctx.fillText(l.t, A.left + 4, py - 3);
+  }
+  ctx.restore(); } };
+// fareyle dikey imleç çizgisi
+const crossPlugin = { id: 'cross', afterDraw(ch) {
+  const a = ch.tooltip?.getActiveElements?.(); if (!a?.length) return;
+  const { ctx, chartArea: A } = ch, x = a[0].element.x;
+  ctx.save(); ctx.strokeStyle = C.axis; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, A.top); ctx.lineTo(x, A.bottom); ctx.stroke(); ctx.restore(); } };
+// seri adını son noktanın yanına yaz (en fazla 4 seri; çakışanları aralar)
+const endLabel = { id: 'endLabel', afterDatasetsDraw(ch) {
+  if (!ch.options.plugins.endLabel?.on || ch.width < 480) return;      // dar ekranda yalnız lejant
+  const { ctx, chartArea: A } = ch, L = [];
+  ch.data.datasets.forEach((d, i) => {
+    const m = ch.getDatasetMeta(i); if (m.hidden) return;
+    for (let k = m.data.length - 1; k >= 0; k--) { const p = m.data[k]; if (d.data[k]?.y != null && !p.skip) { L.push({ y: p.y, t: d.label }); break; } }
+  });
+  L.sort((a, b) => a.y - b.y); for (let i = 1; i < L.length; i++) L[i].y = Math.max(L[i].y, L[i - 1].y + 12);
+  ctx.save(); ctx.font = '11px system-ui'; ctx.fillStyle = C.fg2; ctx.textBaseline = 'middle';
+  L.forEach(l => ctx.fillText(l.t, A.right + 6, Math.min(Math.max(l.y, A.top + 4), A.bottom)));
+  ctx.restore(); } };
+Chart.register(refPlugin, crossPlugin, endLabel);
+Chart.defaults.font.family = 'system-ui,-apple-system,"Segoe UI",sans-serif';
+Chart.defaults.color = C.fg2;
+
+// series: [ad, alan adı ya da fonksiyon, renk]; tek eksen (iki ölçek yok)
+function mk(id, series, o = {}) {
+  const ds = series.map(([label, , color], i) => ({ label, data: [], borderColor: color, backgroundColor: color, borderWidth: 2,
+    pointRadius: 0, pointHoverRadius: 4, spanGaps: false, borderDash: o.dash?.[i] ?? [] }));
+  const many = series.length > 1;
+  const ch = new Chart($(id), { type: 'line', data: { datasets: ds }, options: {
+    animation: false, maintainAspectRatio: false, parsing: false, normalized: true,
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    layout: { padding: c => ({ right: many && c.chart.width >= 480 ? 92 : 8 }) },
+    plugins: {
+      legend: { display: many, position: 'top', align: 'start', labels: { boxWidth: 12, boxHeight: 2, color: C.fg2 } },
+      tooltip: { callbacks: { title: it => `t = ${it[0].parsed.x.toFixed(1)} s`,
+                              label: it => ` ${it.dataset.label}: ${it.parsed.y == null ? '—' : it.parsed.y.toFixed(o.dec ?? 1)}` } },
+      ref: { lines: o.ref }, endLabel: { on: many },
+      decimation: { enabled: true, algorithm: 'min-max' } },
+    scales: {
+      x: { type: 'linear', ticks: { color: C.fg2, maxTicksLimit: 7, includeBounds: false, callback: v => `${+(+v).toFixed(1)} s` },
+           grid: { color: C.grid }, border: { color: C.axis } },
+      y: { ticks: { color: C.fg2, maxTicksLimit: 6 }, grid: { color: C.grid }, border: { color: C.axis },
+           suggestedMin: o.min, suggestedMax: o.max } } } });
+  ch.$series = series;
+  return ch;
+}
+// satırlardan seriyi doldur (x = ECU zamanı, s)
+function fill(ch, rows, x0, x1) {
+  ch.$series.forEach(([, key], i) => {
+    ch.data.datasets[i].data = rows.map(r => ({ x: r.t_ms / 1000, y: typeof key === 'function' ? key(r) : num(r[key]) }));
+  });
+  ch.options.scales.x.min = x0; ch.options.scales.x.max = x1;
+  ch.update('none');
+}
+
+// durum şeridi: her satırın durumu renkli bölüt; geniş bölütün içine adı yazılır
+function strip(cv, rows, x0, x1) {
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = C.grid; ctx.fillRect(0, 0, w, h);
+  const px = t => (t / 1000 - x0) / (x1 - x0) * w;
+  const segs = [];
+  for (const r of rows) {
+    const s = +r.state, last = segs[segs.length - 1];
+    if (last && last.s === s && r.t_ms - last.t1 < 1000) last.t1 = r.t_ms; else segs.push({ s, t0: r.t_ms, t1: r.t_ms });
+  }
+  ctx.font = '600 11px system-ui'; ctx.textBaseline = 'middle';
+  for (const g of segs) {
+    const a = Math.max(0, px(g.t0)), b = Math.min(w, px(g.t1 + 100));
+    if (b <= a) continue;
+    ctx.fillStyle = ST_COL[g.s] ?? C.none; ctx.fillRect(a, 0, Math.max(1, b - a - 1), h);   // 1 px boşluk: bölüt ayırıcı
+    const t = STATES[g.s] ?? '?';
+    if (b - a > ctx.measureText(t).width + 12) { ctx.fillStyle = g.s === 2 ? '#0b0b0b' : '#fff'; ctx.fillText(t, a + 6, h / 2); }
+  }
+  cv.$rows = rows; cv.$x = [x0, x1];
+}
+$('st_legend').innerHTML = [1, 2, 3, 4].map(s => `<span><i style="background:${ST_COL[s]}"></i>${STATES[s]}</span>`).join('');
+
+// ---------------------------------------------------------------- canlı veri
+const MAXBUF = 3000;                 // 10 Hz'de 5 dk
+let buf = [], lastId = 0, win = 60, lastRx = null;
+const ch = {
+  cur: mk('c_cur', [['I measured', 'i_meas', C.s1], ['I_allow discharge', 'i_allow', C.s2],
+                    ['−I_allow charge', r => r.i_chg == null ? null : -r.i_chg, C.s3]], { dash: [[], [6, 3], [6, 3]] }),
+  tmp: mk('c_tmp', [['Core est.', 'temp', C.s1], ['Surface est.', 'ts', C.s2], ['Measured', 't_meas', C.s3]],
+          { max: 62, ref: [{ v: 45, t: 'derate 45 °C' }, { v: 55, t: 'LIMP 55 °C' }, { v: 60, t: 'SAFE 60 °C' }] }),
+  v: mk('c_v', [['Max group', 'v_max', C.s1], ['Min group', 'v_min', C.s2]], { dec: 3 }),
+  soc: mk('c_soc', [['SOC', 'soc', C.s1]], { dec: 2 }),
+};
+
+let draw = function () {
+  if (!buf.length) return;
+  const x1 = buf[buf.length - 1].t_ms / 1000, x0 = Math.max(buf[0].t_ms / 1000, x1 - win);
+  const rows = buf.filter(r => r.t_ms / 1000 >= x0);
+  Object.values(ch).forEach(c => fill(c, rows, x0, x1));
+  strip($('strip'), rows, x0, x1 === x0 ? x0 + 1 : x1);
+}
+
+function kpis(x) {
+  const has = x.v_pack != null;
+  $('wide_hint').style.display = has ? 'none' : 'block';
+  $('k_soc').textContent = f(x.soc);
+  $('k_v').textContent = f(x.v_pack);
+  $('k_i').textContent = f(x.i_meas);
+  $('k_p').textContent = has && x.i_meas != null ? f(x.v_pack * x.i_meas / 1000, 1) : '—';
+  $('k_ia').textContent = `${f(x.i_allow)} / ${f(x.i_chg)}`;
+  $('k_psi').textContent = x.psi == null ? '—' : f(100 * x.psi, 0);
+  $('k_tc').textContent = `${f(x.temp)} / ${f(x.ts)}`;
+  $('k_tm').textContent = f(x.t_meas);
+  $('k_vg').textContent = x.v_min == null ? '—' : `${f(x.v_min, 3)} / ${f(x.v_max, 3)}`;
+  $('k_dv').textContent = x.v_min == null ? '—' : f(1000 * (x.v_max - x.v_min), 0);
+  $('k_soh').textContent = f(x.soh);
+  $('k_can').textContent = `${x.tec} / ${x.rec}`;
+  $('kpi_t').textContent = `run ${x.run_id}, ECU t = ${(x.t_ms / 1000).toFixed(1)} s`;
+  $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `badge s${x.state}`;
+  const cs = causeText(x.cause);
+  $('causes').innerHTML = (cs ?? []).map(t => `<span class="chip">${esc(t)}</span>`).join(' ');
 }
 
 async function live() {
   try {
-    const r = await fetch(`data.php?q=live&since=${lastId}`);
-    const j = await r.json();
+    const j = await (await fetch(lastId ? `data.php?q=live&since=${lastId}` : `data.php?q=live&n=${MAXBUF}`)).json();
     for (const x of j.rows) {
-      if (lastRun !== null && +x.run_id !== lastRun) { clear(c1); clear(c2); }
-      lastRun = +x.run_id;
-      const lbl = (x.t_ms / 1000).toFixed(1);
-      push(c1, lbl, [x.soc, x.soh]);
-      push(c2, lbl, [x.temp, x.i_allow]);
-      lastId = Math.max(lastId, +x.id);
+      for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
+                       'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max']) x[k] = num(x[k]);
+      const p = buf[buf.length - 1];
+      if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
+      buf.push(x); lastId = Math.max(lastId, +x.id);
     }
-    if (j.rows.length) {
-      c1.update(); c2.update();
-      const x = j.rows[j.rows.length - 1];
-      $('k_soc').textContent = f(x.soc); $('k_soh').textContent = f(x.soh);
-      $('k_T').textContent = f(x.temp); $('k_I').textContent = f(x.i_allow);
-      $('k_tec').textContent = `${x.tec}/${x.rec}`; $('k_run').textContent = x.run_id;
-      $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `state s${x.state}`;
-      $('conn').textContent = `last packet ${x.rx_at}`;
-    }
-    $('events').innerHTML = j.events.map(e => `<li>[run ${esc(e.run_id)}, ${(e.t_ms/1000).toFixed(1)} s] <b>${esc(e.code)}</b> ${esc(e.detail)}</li>`).join('');
-  } catch (e) { $('conn').textContent = 'connection error'; }
+    if (buf.length > MAXBUF) buf = buf.slice(-MAXBUF);
+    if (j.rows.length) { const x = buf[buf.length - 1]; lastRx = utc(x.rx_at); kpis(x); overview(x); draw(); }
+    alerts(j.events);
+    $('events').innerHTML = j.events.map(e => {
+      const st = STATES.indexOf(String(e.code).replace('_', '-')), col = st > 0 ? ST_COL[st] : C.axis;
+      const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false });
+      return `<li><span class="dot" style="background:${col}"></span><time>${t}</time><span><b>${esc(e.code)}</b> ${esc(e.detail === '-' ? '' : e.detail)}
+              <small style="color:var(--mut)">(run ${esc(e.run_id)}, ${(e.t_ms / 1000).toFixed(1)} s)</small></span></li>`;
+    }).join('');
+  } catch (e) { $('fresh').innerHTML = '<i class="live"></i>Connection error'; $('fresh').className = 'stale'; }
+}
+function fresh() {
+  if (lastRx == null) return;
+  const s = (Date.now() - lastRx) / 1000;
+  $('fresh').innerHTML = '<i class="live"></i>' + (s < 5 ? 'Live' : `No new data for ${s < 120 ? s.toFixed(0) + ' s' : (s / 60).toFixed(0) + ' min'}`);
+  $('fresh').className = s < 5 ? 'on' : 'stale';
+  if (s >= 5) { $('banner').className = 'banner'; $('b_ico').textContent = '?'; $('b_title').textContent = 'No live data';
+                $('b_text').textContent = 'The values below are the last ones received.'; }
 }
 
+// şerit üstünde fareyle durum + neden
+$('strip').addEventListener('mousemove', ev => {
+  const cv = ev.currentTarget; if (!cv.$rows?.length) return;
+  const [x0, x1] = cv.$x, t = x0 + (ev.offsetX / cv.clientWidth) * (x1 - x0);
+  let best = cv.$rows[0]; for (const r of cv.$rows) if (Math.abs(r.t_ms / 1000 - t) < Math.abs(best.t_ms / 1000 - t)) best = r;
+  const cs = causeText(best.cause);
+  $('strip_info').textContent = `t = ${(best.t_ms / 1000).toFixed(1)} s: ${STATES[best.state] ?? '?'}` + (cs?.length ? ` (${cs.join(', ')})` : '');
+});
+$('strip').addEventListener('mouseleave', () => $('strip_info').textContent = 'hover for details');
+
+$('win').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  win = +b.dataset.s;
+  $('win').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  draw();
+});
+// sekmeler: gizli sekmedeki grafikler boyutsuz kalır, açılınca yeniden boyutla
+$('tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button'); if (!b) return;
+  $('tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-selected', x === b));
+  $('ov').hidden = b.dataset.v !== 'ov'; $('eng').hidden = b.dataset.v !== 'eng';
+  if (b.dataset.v === 'eng') { Object.values(ch).forEach(c => c.resize()); cRtt.resize(); } else cPow.resize();
+  draw();
+  try { localStorage.setItem('bms_tab', b.dataset.v); } catch (e) {}
+});
+$('csv').addEventListener('click', () => {
+  const cols = ['t_ms', 'run_id', 'state', 'cause', 'soc', 'soh', 'temp', 'ts', 't_meas', 'i_meas', 'i_allow', 'i_chg', 'psi',
+                'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'rx_at'];
+  const head = ['t_ms', 'run', 'state', 'cause', 'soc_pct', 'soh_pct', 'tc_est_C', 'ts_est_C', 't_meas_C', 'i_meas_A',
+                'i_allow_dis_A', 'i_allow_chg_A', 'psi', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec', 'rx_utc'];
+  const csv = [head.join(',')].concat(buf.map(r => cols.map(c => r[c] ?? '').join(','))).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `bms_live_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.csv`; a.click();
+});
+addEventListener('resize', () => draw());
+
+// ---------------------------------------------------------------- bağlantı kalitesi
+// RTT ve UART -> sunucu gecikmesi gateway'de tek saatle ölçülür (link tablosu, data.php?q=link / linkhist)
+const cRtt = new Chart($('c_rtt'), { type: 'line', data: { datasets: [{ label: 'RTT', data: [], borderColor: C.s1, backgroundColor: C.s1,
+  borderWidth: 2, pointRadius: 0, pointHoverRadius: 4 }] }, options: {
+  animation: false, maintainAspectRatio: false, parsing: false, interaction: { mode: 'nearest', axis: 'x', intersect: false },
+  plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => `${(-it[0].parsed.x).toFixed(0)} s ago`, label: it => ` RTT ${it.parsed.y} ms` } } },
+  scales: { x: { type: 'linear', min: -300, max: 0, ticks: { color: C.fg2, callback: v => v === 0 ? 'now' : `${v / 60} min`, stepSize: 60 },
+                 grid: { color: C.grid }, border: { color: C.axis } },
+            y: { beginAtZero: true, ticks: { color: C.fg2, maxTicksLimit: 4 }, grid: { color: C.grid }, border: { color: C.axis } } } } });
+
+async function link() {
+  try {
+    const [j, h] = await Promise.all([(await fetch('data.php?q=link&min=5')).json(), (await fetch('data.php?q=linkhist&min=5')).json()]);
+    const pair = (a, b) => a == null ? '—' : `${a} / ${b}`;
+    $('l_rtt').textContent = pair(j.rtt_p50, j.rtt_p95);
+    $('l_age').textContent = pair(j.age_p50, j.age_p95);
+    $('l_loss').textContent = j.loss_pct == null ? '—' : j.loss_pct.toFixed(2);
+    $('l_jit').textContent = j.jit_p95 ?? '—';
+    $('l_bad').textContent = `${j.uart_bad} / ${j.resent}`;
+    $('l_n').textContent = `${j.batches} / ${j.rows}`;
+    $('o_link').innerHTML = j.rtt_p50 == null ? 'No uploads in the last 5 minutes.' :
+      `Upload round-trip <b>${j.rtt_p50} ms</b> (95 % under ${j.rtt_p95} ms)<br>` +
+      `Sensor to screen <b>${(j.age_p50 / 1000).toFixed(1)} s</b> (data is sent once per second)<br>` +
+      `Lines lost on the serial link <b>${j.loss_pct == null ? '—' : j.loss_pct.toFixed(2) + ' %'}</b> of ${j.rows} in the last 5 minutes`;
+    cRtt.data.datasets[0].data = h.rows.filter(r => r.prev_rtt_ms != null).map(r => ({ x: (r.srv_ms - h.now_ms) / 1000, y: +r.prev_rtt_ms }));
+    cRtt.update('none');
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------- senaryo merkezi
 async function runs() {
   try {
     const j = await (await fetch('data.php?q=runs')).json();
     const p = j.filter(r => r.result === 'PASS').length, fl = j.filter(r => r.result === 'FAIL').length;
-    $('sum').textContent = `${j.length} runs — ${p} PASS, ${fl} FAIL` + (p + fl ? ` (pass rate ${(100 * p / (p + fl)).toFixed(1)} %)` : '');
+    $('sum').textContent = `${j.length} runs — ${p} PASS, ${fl} FAIL` + (p + fl ? ` (pass rate ${(100 * p / (p + fl)).toFixed(1)} %)` : '') + ' · click a row for its traces';
     $('runs').innerHTML = j.map(r => `<tr class="click" data-id="${esc(r.run_id)}" data-name="${esc(r.name)}">
-      <td>${esc(r.run_id)}</td><td>${esc(r.name)}</td><td class="${esc(r.result)}">${esc(r.result)}</td><td>${esc(r.dur_s ?? '—')}</td><td>${esc(r.summary)}</td></tr>`).join('');
+      <td>${esc(r.run_id)}</td><td>${esc(r.name)}</td><td class="res ${esc(r.result)}">${esc(r.result)}</td><td>${esc(r.dur_s ?? '—')}</td><td>${esc(r.summary)}</td></tr>`).join('');
   } catch (e) {}
 }
-
+const dch = { soc: mk('d_soc', [['SOC', 'soc', C.s1]], { dec: 2 }),
+              tmp: mk('d_tmp', [['Core est.', 'temp', C.s1]], { max: 62, ref: [{ v: 55, t: 'LIMP 55 °C' }, { v: 60, t: 'SAFE 60 °C' }] }),
+              ia: mk('d_ia', [['I_allow discharge', 'i_allow', C.s1]]) };
 async function detail(id, name) {
   const j = await (await fetch(`data.php?q=run&id=${id}`)).json();
-  c3.data.labels = j.rows.map(x => (x.t_ms / 1000).toFixed(1));
-  c3.data.datasets[0].data = j.rows.map(x => x.soc);
-  c3.data.datasets[1].data = j.rows.map(x => x.temp);
-  c3.data.datasets[2].data = j.rows.map(x => x.i_allow);
-  c3.data.datasets[3].data = j.rows.map(x => x.state * 10);
-  c3.update();
-  $('dtitle').textContent = `Run ${id} — ${name} (state ×10 on right axis)`;
+  const rows = j.rows.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v)])));
   $('detail').style.display = '';
+  $('dtitle').textContent = `Run ${id} — ${name}`;
+  if (!rows.length) return;
+  const x0 = rows[0].t_ms / 1000, x1 = rows[rows.length - 1].t_ms / 1000;
+  Object.values(dch).forEach(c => fill(c, rows, x0, x1));
+  strip($('d_strip'), rows, x0, x1 === x0 ? x0 + 1 : x1);
+  $('detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
-
 $('runs').addEventListener('click', ev => {
   const tr = ev.target.closest('tr[data-id]');
   if (tr) detail(+tr.dataset.id, tr.dataset.name);
 });
-live(); runs();
+
+// ---------------------------------------------------------------- Overview (sürücü görünümü)
+// nominal sınırlar: veri sayfası 1,5C deşarj / 0,7C şarj x Np (bms_algo.c I_nom_dis / I_nom_chg)
+const I_NOM_DIS = 7.275 * 12, I_NOM_CHG = 3.395 * 12, T_SCALE = 65;
+const REASON = [[1, 'the battery is warm'], [2, 'a cooling fault is suspected'], [4, 'a cell voltage is low'],
+                [8, 'a cell voltage is high'], [16, 'it is too warm to charge at full rate'], [32, 'a sensor has failed'],
+                [64, 'the battery is nearly empty'], [128, 'a hard safety limit was reached'], [256, 'unexplained heating was detected']];
+const TITLE = ['Waiting for data', 'Battery OK', 'Power limited', 'Limp-home mode', 'Battery disconnected'];
+const BASE = ['', 'Full power is available.', '', 'Reduced power to reach a safe stop.', 'The contactor is open; no power is available.'];
+const ICON = ['·', '✓', '!', '!', '✕'];
+const EVTXT = { BOOT: 'Battery controller started', NORMAL: 'Back to normal', DERATE: 'Power limited', LIMP_HOME: 'Limp-home mode',
+  SAFE_STOP: 'Battery disconnected', THERMAL_DERATE: 'Battery warm, power reduced', COOLING_ALARM: 'Cooling fault suspected',
+  SOP_DISCHARGE: 'Low cell voltage, power reduced', SOP_CHARGE: 'High cell voltage, charging reduced',
+  DATASHEET_T_LIMIT: 'Charging limited by temperature', SENSOR_FAULT: 'Sensor fault', SOC_EMPTY: 'Battery nearly empty',
+  HARD_LIMIT: 'Hard safety limit reached', THERMAL_ANOMALY: 'Unexplained heating detected', CAN_TIMEOUT: 'Measurements lost',
+  CONTACTOR_OPEN: 'Contactor opened', CONTACTOR_CLOSE: 'Contactor closed' };
+const pct = (v, m) => `${Math.max(0, Math.min(100, 100 * v / m))}%`;
+const kw = v => Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0);
+
+$('o_tticks').innerHTML = [0, 45, 55, 60].map(t => `<span style="left:${100 * t / T_SCALE}%">${t}</span>`).join('');
+
+function overview(x) {
+  // durum: sade dille başlık + neden
+  const st = x.state ?? 0;
+  let why = REASON.filter(([b]) => (x.cause ?? 0) & b).map(([, t]) => t);
+  if (st === 4 && lastEv.slice(0, 4).some(e => e.code === 'CAN_TIMEOUT')) why = ['measurements from the battery stopped arriving'];
+  $('banner').className = `banner s${st}`; $('b_ico').textContent = ICON[st] ?? '?';
+  $('b_title').textContent = TITLE[st] ?? '?';
+  const tail = why.length ? `Because ${why.join(' and ')}.` : '';
+  $('b_text').textContent = [BASE[st], st >= 2 ? tail : ''].filter(Boolean).join(' ') || ' ';
+  // şarj
+  $('o_soc').textContent = f(x.soc, 0);
+  $('o_socbar').style.width = pct(x.soc ?? 0, 100);
+  $('o_soc_cap').textContent = x.v_pack == null ? ' ' : `Pack voltage ${f(x.v_pack)} V`;
+  // güç: + sürüş, - şarj; açık şerit = izin verilen, koyu = kullanılan
+  if (x.v_pack != null && x.i_meas != null) {
+    const v = x.v_pack, p = v * x.i_meas / 1000, pd = v * (x.i_allow ?? 0) / 1000, pc = v * (x.i_chg ?? 0) / 1000;
+    const nd = v * I_NOM_DIS / 1000, nc = v * I_NOM_CHG / 1000;
+    $('o_pw').textContent = kw(p);
+    $('o_pw_h').textContent = p < -0.05 ? 'Charging' : 'Power';
+    $('o_avd').style.width = pct(pd, nd); $('o_used').style.width = pct(Math.max(p, 0), nd);
+    $('o_avc').style.width = pct(pc, nc); $('o_usec').style.width = pct(Math.max(-p, 0), nc);
+    $('o_pw_cap').textContent = p < -0.05 ? `Charging at ${kw(-p)} of ${kw(pc)} kW allowed`
+                                          : `${kw(pd)} kW available for driving · ` +
+                                            (pc < 0.05 ? 'charging not allowed now' : `${kw(pc)} kW for charging`);
+  } else {
+    $('o_pw').textContent = '—';
+    $('o_pw_cap').textContent = `Allowed current ${f(x.i_allow, 0)} A (power needs wide telemetry)`;
+  }
+  // sıcaklık: çekirdek kestirimi (ECU'nun karar verdiği değer)
+  const t = x.temp;
+  $('o_t').textContent = f(t, 0);
+  $('o_tmk').style.left = `calc(${pct(t ?? 0, T_SCALE)} - 2px)`;
+  const zone = t == null ? '' : t < 45 ? 'Normal range' : t < 55 ? 'Warm: power is reduced' : t < 60 ? 'Hot: limp-home' : 'Too hot: disconnect';
+  $('o_t_cap').textContent = zone + (x.t_meas == null ? '' : x.t_meas <= -39.5 ? ' · surface sensor not reading'
+                                                                              : ` · surface sensor ${f(x.t_meas)} °C`);
+  // hücre dengesi
+  if (x.v_min != null) {
+    $('o_dv').textContent = f(1000 * (x.v_max - x.v_min), 0);
+    $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)`;
+  } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
+  $('o_soh_cap').textContent = `Battery health ${f(x.soh, 0)} %`;
+}
+
+let lastEv = [];
+function alerts(evs) {
+  lastEv = evs.filter(e => +e.run_id === 0);
+  const L = evs.filter(e => +e.run_id === 0).slice(0, 6);
+  $('alerts').innerHTML = L.length ? L.map(e => {
+    const st = STATES.indexOf(String(e.code).replace('_', '-')), col = st > 0 ? ST_COL[st] : C.axis;
+    const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
+    return `<li><time>${t}</time><span class="dot" style="background:${col}"></span><span>${esc(EVTXT[e.code] ?? e.code)}</span></li>`;
+  }).join('') : '<li class="muted">None</li>';
+}
+
+// güç eğrisi (kW, tek eksen): kullanılan + sürüş ve şarj için izin verilen
+const cPow = mk('c_pow', [['Used', r => r.v_pack == null || r.i_meas == null ? null : r.v_pack * r.i_meas / 1000, C.s1],
+                          ['Allowed (drive)', r => r.v_pack == null ? null : r.v_pack * r.i_allow / 1000, C.s2],
+                          ['Allowed (charge)', r => r.v_pack == null || r.i_chg == null ? null : -r.v_pack * r.i_chg / 1000, C.s3]],
+                { dash: [[], [6, 3], [6, 3]] });
+cPow.options.scales.x.ticks.callback = v => v === 0 ? 'now' : `${Math.round(v)} s`;
+cPow.options.plugins.tooltip.callbacks.title = it => `${Math.abs(it[0].parsed.x).toFixed(0)} s ago`;
+cPow.options.plugins.tooltip.callbacks.label = it => ` ${it.dataset.label}: ${it.parsed.y == null ? '—' : it.parsed.y.toFixed(2)} kW`;
+const drawEng = draw;
+draw = function () {
+  if (!buf.length) return;
+  if (!$('eng').hidden) drawEng();
+  const x1 = buf[buf.length - 1].t_ms / 1000, x0 = Math.max(buf[0].t_ms / 1000, x1 - 60);
+  if (!$('ov').hidden) fill(cPow, buf.filter(r => r.t_ms / 1000 >= x0).map(r => ({ ...r, t_ms: r.t_ms - 1000 * x1 })), x0 - x1, 0);
+};
+try { const v = localStorage.getItem('bms_tab'); if (v === 'eng') $('tabs').querySelector('[data-v="eng"]').click(); } catch (e) {}
+
+live(); runs(); link();
 setInterval(live, 1000);
+setInterval(fresh, 1000);
 setInterval(runs, 5000);
+setInterval(link, 5000);
 </script>
 </body>
 </html>

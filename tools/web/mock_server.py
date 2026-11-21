@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -26,20 +27,29 @@ os.makedirs(os.path.dirname(os.path.abspath(a.db)), exist_ok=True)
 db = sqlite3.connect(a.db, check_same_thread=False)
 db.row_factory = sqlite3.Row
 lock = threading.Lock()
-db.executescript("""
-CREATE TABLE IF NOT EXISTS runs (run_id INTEGER PRIMARY KEY, name TEXT NOT NULL,
-  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ended_at TEXT, result TEXT NOT NULL DEFAULT 'RUNNING', summary TEXT);
-CREATE TABLE IF NOT EXISTS telemetry (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL DEFAULT 0,
-  t_ms INTEGER NOT NULL, soc REAL, soh REAL, temp REAL, i_allow REAL, state INTEGER, tec INTEGER, rec INTEGER,
-  rx_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL DEFAULT 0,
-  t_ms INTEGER NOT NULL, code TEXT NOT NULL, detail TEXT, rx_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-""")
+with open(os.path.join(HERE, "server", "schema.sql"), encoding="utf-8") as fs:
+    db.executescript(fs.read())                     # api.php ile aynı şema (tek kaynak)
+# geniş satır kolonları (config.php TELEMETRY_X ile aynı): eski tabloya ekle
+TELEMETRY_X = ["cause", "ts", "i_chg", "psi", "i_meas", "v_pack", "t_meas", "v_min", "v_max"]
+_have = {r[1] for r in db.execute("PRAGMA table_info(telemetry)")}
+for _c in TELEMETRY_X:
+    if _c not in _have:
+        db.execute(f"ALTER TABLE telemetry ADD COLUMN {_c} {'INTEGER' if _c == 'cause' else 'REAL'}")
 
 
 def rows(sql, args=()):
     with lock:
         return [dict(r) for r in db.execute(sql, args).fetchall()]
+
+
+def iv(m, k):
+    v = m.get(k)
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def pct(v, q):                                       # data.php pct() ile aynı
+    v = sorted(x for x in v if x is not None)
+    return int(v[min(len(v) - 1, int(round(q / 100 * (len(v) - 1))))]) if v else None
 
 
 class H(BaseHTTPRequestHandler):
@@ -64,7 +74,13 @@ class H(BaseHTTPRequestHandler):
             j = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         except ValueError:
             return self.out({"error": "bad json"}, 400)
-        with lock:      # sıra api.php ile aynı: başlayan senaryo (eski izi sil) -> satırlar -> olaylar -> bitenler
+        m = j.get("meta") if isinstance(j.get("meta"), dict) else {}
+        seq = iv(m, "seq")
+        with lock:      # sıra api.php ile aynı: tekrar kontrolü -> başlayan senaryo -> satırlar -> olaylar -> bitenler -> link
+            if seq is not None:
+                last = db.execute("SELECT MAX(seq) FROM link").fetchone()[0]
+                if last is not None and seq <= last:
+                    return self.out({"error": "replay", "last_seq": last}, 409)
             for r in j.get("runs", []):
                 if r["op"] == "start":
                     db.execute("DELETE FROM telemetry WHERE run_id=? AND run_id>0", (int(r["id"]),))
@@ -72,8 +88,11 @@ class H(BaseHTTPRequestHandler):
                     db.execute("INSERT INTO runs (run_id,name) VALUES (?,?) ON CONFLICT(run_id) DO UPDATE SET name=excluded.name, "
                                "started_at=CURRENT_TIMESTAMP, ended_at=NULL, result='RUNNING', summary=NULL", (int(r["id"]), r["name"][:64]))
             for r in j.get("rows", []):
-                db.execute("INSERT INTO telemetry (run_id,t_ms,soc,soh,temp,i_allow,state,tec,rec) VALUES (?,?,?,?,?,?,?,?,?)",
-                           (int(r["run"]), int(r["t"]), r["soc"], r["soh"], r["T"], r["I"], int(r["st"]), int(r["tec"]), int(r["rec"])))
+                x = [r.get(c) if isinstance(r.get(c), (int, float)) else None for c in TELEMETRY_X]
+                db.execute(f"INSERT INTO telemetry (run_id,t_ms,soc,soh,temp,i_allow,state,tec,rec,{','.join(TELEMETRY_X)}) "
+                           f"VALUES (?,?,?,?,?,?,?,?,?{',?' * len(TELEMETRY_X)})",
+                           (int(r["run"]), int(r["t"]), r["soc"], r["soh"], r["T"], r["I"], int(r["st"]), int(r["tec"]),
+                            int(r["rec"]), *x))
             for e in j.get("events", []):
                 db.execute("INSERT INTO events (run_id,t_ms,code,detail) VALUES (?,?,?,?)",
                            (int(e["run"]), int(e["t"]), e["code"][:32], (e.get("detail") or "")[:255]))
@@ -81,6 +100,12 @@ class H(BaseHTTPRequestHandler):
                 if r["op"] == "end":
                     db.execute("UPDATE runs SET ended_at=CURRENT_TIMESTAMP, result=?, summary=? WHERE run_id=?",
                                ("PASS" if r["result"] == "PASS" else "FAIL", (r.get("summary") or "")[:255], int(r["id"])))
+            db.execute("INSERT INTO link (seq,srv_ms,sent_ms,rx_first_ms,rx_last_ms,n_rows,n_events,uart_missing,uart_bad,"
+                       "jit_ms,prev_rtt_ms,prev_age_ms,resent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (seq, int(time.time() * 1000), iv(m, "sent_ms"), iv(m, "rx_first"), iv(m, "rx_last"),
+                        len(j.get("rows", [])), len(j.get("events", [])) + len(j.get("runs", [])),
+                        iv(m, "uart_missing"), iv(m, "uart_bad"), iv(m, "jit_ms"), iv(m, "prev_rtt_ms"),
+                        iv(m, "prev_age_ms"), iv(m, "resent") or 0))
             db.commit()
         self.out({"ok": True, "rows": len(j.get("rows", []))})
 
@@ -94,7 +119,8 @@ class H(BaseHTTPRequestHandler):
         k = q.get("q", ["live"])[0]
         if k == "live":
             since = int(q.get("since", ["0"])[0])
-            r = (rows("SELECT * FROM (SELECT * FROM telemetry ORDER BY id DESC LIMIT 600) ORDER BY id") if since == 0
+            n = max(1, min(3000, int(q.get("n", ["600"])[0])))
+            r = (rows(f"SELECT * FROM (SELECT * FROM telemetry ORDER BY id DESC LIMIT {n}) ORDER BY id") if since == 0
                  else rows("SELECT * FROM telemetry WHERE id > ? ORDER BY id LIMIT 600", (since,)))
             return self.out({"rows": r, "events": rows("SELECT * FROM events ORDER BY id DESC LIMIT 20")})
         if k == "runs":
@@ -102,8 +128,28 @@ class H(BaseHTTPRequestHandler):
                                  "FROM runs r ORDER BY started_at DESC, run_id DESC LIMIT 200"))
         if k == "run":
             i = int(q.get("id", ["0"])[0])
-            return self.out({"rows": rows("SELECT t_ms,soc,soh,temp,i_allow,state FROM telemetry WHERE run_id=? ORDER BY t_ms", (i,)),
+            return self.out({"rows": rows("SELECT t_ms,soc,soh,temp,i_allow,state,cause,ts,i_chg,i_meas,v_min,v_max FROM telemetry "
+                                     "WHERE run_id=? ORDER BY t_ms", (i,)),
                              "events": rows("SELECT t_ms,code,detail FROM events WHERE run_id=? ORDER BY t_ms", (i,))})
+        if k == "linkhist":
+            mn = max(1, min(1440, int(q.get("min", ["5"])[0])))
+            now = int(time.time() * 1000)
+            return self.out({"now_ms": now, "rows": rows("SELECT srv_ms,prev_rtt_ms,prev_age_ms,n_rows,uart_missing,uart_bad,resent "
+                                                         "FROM link WHERE srv_ms >= ? ORDER BY id LIMIT 2000", (now - mn * 60000,))})
+        if k == "link":
+            mn = max(1, min(1440, int(q.get("min", ["5"])[0])))
+            L = rows("SELECT * FROM link WHERE srv_ms >= ? ORDER BY id", (int(time.time() * 1000) - mn * 60000,))
+            nr = sum(r["n_rows"] for r in L)
+            miss = sum(r["uart_missing"] or 0 for r in L)
+            col = lambda c: [r[c] for r in L]
+            return self.out({"minutes": mn, "batches": len(L), "rows": nr, "uart_missing": miss,
+                             "uart_bad": sum(r["uart_bad"] or 0 for r in L), "resent": sum(r["resent"] for r in L),
+                             "loss_pct": round(100 * miss / (nr + miss), 3) if nr + miss else None,
+                             "rtt_p50": pct(col("prev_rtt_ms"), 50), "rtt_p95": pct(col("prev_rtt_ms"), 95),
+                             "age_p50": pct(col("prev_age_ms"), 50), "age_p95": pct(col("prev_age_ms"), 95),
+                             "jit_p95": pct(col("jit_ms"), 95),
+                             "oneway_p50": pct([None if r["sent_ms"] is None else r["srv_ms"] - r["sent_ms"] for r in L], 50),
+                             "last_srv_ms": L[-1]["srv_ms"] if L else None})
         self.out({"error": "bad q"}, 400)
 
 
