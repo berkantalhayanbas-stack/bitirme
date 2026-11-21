@@ -22,6 +22,7 @@
     }
   }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }   /* #ov { display:grid } gizli sekmeyi açık bırakıyordu */
   body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--page); color:var(--fg); }
   header { padding:14px 16px 10px; display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; }
   h1 { font-size:18px; margin:0; font-weight:650; }
@@ -126,6 +127,18 @@
   .ok::before { content:"✓"; color:var(--good); } .miss::before { content:"✕"; color:var(--critical); }
   .wait::before { content:"…"; color:var(--mut); } .wait { color:var(--fg2); }
   .conn b { color:var(--fg); font-weight:600; }
+  /* ---- stres indeksi Ψ: alt indeks çubukları (0-1 ortak ölçek, ince çizgi = kriterin tavanı) */
+  .stress { display:grid; grid-template-columns:auto minmax(0,1fr); gap:6px 20px; align-items:center; }
+  @media (max-width:620px) { .stress { grid-template-columns:1fr; } }
+  .psibar { height:14px; border-radius:7px; background:var(--grid); margin-top:12px; overflow:hidden; }
+  .psibar div { height:100%; width:0; background:var(--fg2); border-radius:7px; transition:width .6s; }
+  .crit { display:grid; grid-template-columns:minmax(120px,170px) minmax(0,1fr) 44px; gap:8px; align-items:center; font-size:12.5px;
+          color:var(--fg2); padding:3px 0; }
+  .crit .tr { position:relative; height:10px; border-radius:5px; background:var(--grid); }
+  .crit .tr i { position:absolute; left:0; top:0; bottom:0; border-radius:5px; width:0; transition:width .4s; }
+  .crit .tr u { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--axis); }
+  .crit b { font-weight:600; color:var(--fg); text-align:right; font-variant-numeric:tabular-nums; }
+  .crit.dom span { color:var(--fg); font-weight:600; }
 </style>
 </head>
 <body>
@@ -173,6 +186,18 @@
     </section>
   </div>
   <section class="tile">
+    <div class="stress">
+      <div>
+        <h3>Battery stress</h3>
+        <div class="big"><span id="o_psi">—</span><small>%</small></div>
+      </div>
+      <div>
+        <div class="psibar" aria-hidden="true"><div id="o_psibar"></div></div>
+        <p class="cap" id="o_psi_cap">&nbsp;</p>
+      </div>
+    </div>
+  </section>
+  <section class="tile">
     <h3>Power used and available <span class="muted">· last minute</span></h3>
     <div class="plot" style="height:200px"><canvas id="c_pow"></canvas></div>
   </section>
@@ -208,7 +233,9 @@
       <div class="kpi"><b id="k_i">—</b><span>Current (A, + discharge)</span></div>
       <div class="kpi"><b id="k_p">—</b><span>Power (kW)</span></div>
       <div class="kpi"><b id="k_ia">—</b><span>I_allow dis / chg (A)</span></div>
-      <div class="kpi"><b id="k_psi">—</b><span>Derating ψ (%)</span></div>
+      <div class="kpi"><b id="k_psi">—</b><span>Total derating (1 − I_allow/I_nom) (%)</span></div>
+      <div class="kpi"><b id="k_psis">—</b><span>Stress index Ψ (%)</span></div>
+      <div class="kpi"><b id="k_td">—</b><span>dT/dt (°C/min) / k_R</span></div>
       <div class="kpi"><b id="k_tc">—</b><span>Core / surface est. (°C)</span></div>
       <div class="kpi"><b id="k_tm">—</b><span>Measured temp. (°C)</span></div>
       <div class="kpi"><b id="k_vg">—</b><span>Group V min / max (V)</span></div>
@@ -223,6 +250,17 @@
     <h2>State timeline <small id="strip_info">hover for details</small></h2>
     <canvas id="strip" class="strip"></canvas>
     <div class="legend" id="st_legend"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Stress index Ψ <small>Ψ = min(1, Ψ_max + 0.25·(ΣΨ_i − Ψ_max)); I_allow = I_datasheet·(1 − Ψ), then SOP and limp-home limits</small></h2>
+    <div class="grid" style="padding:0">
+      <div>
+        <div id="crits"></div>
+        <p class="note" id="psi_note">Needs the ECU built with BMS_TELEMETRY=2 (stress fields).</p>
+      </div>
+      <div><div class="plot" style="height:200px"><canvas id="c_psi"></canvas></div></div>
+    </div>
   </div>
 
   <div class="card"><h2>Current vs. allowed current (A)</h2><div class="plot"><canvas id="c_cur"></canvas></div></div>
@@ -266,9 +304,14 @@
 <script>
 // ECU durum kodları (bms_algo.h): 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP
 const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
-// neden bitleri (bms_algo.h): 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş, 128 sert sınır, 256 anomali
+// neden bitleri (bms_algo.h): 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş, 128 sert sınır,
+// 256 anomali, 512 sıcaklık artış hızı, 1024 direnç artışı
 const CAUSES = [[1, 'Thermal derate'], [2, 'Cooling alarm'], [4, 'SOP discharge'], [8, 'SOP charge'], [16, 'Datasheet T limit'],
-                [32, 'Sensor fault'], [64, 'SOC empty'], [128, 'Hard limit'], [256, 'Thermal anomaly']];
+                [32, 'Sensor fault'], [64, 'SOC empty'], [128, 'Hard limit'], [256, 'Thermal anomaly'],
+                [512, 'Temp. rise rate'], [1024, 'Resistance growth']];
+// stres indeksinin kriterleri (bms_algo.h PSI_*): alan, ad, tavan, sade dil; baskın kriter kodu = sıra + 1
+const CRIT = [['psi_t', 'Core temperature', 1.0, 'battery temperature'], ['psi_c', 'Cooling alarm', 0.3, 'a suspected cooling fault'],
+              ['psi_tdot', 'Temperature rise rate', 0.5, 'a fast temperature rise'], ['psi_h', 'Cell resistance (k_R)', 0.3, 'cell ageing (higher resistance)']];
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const C = Object.fromEntries(['fg', 'fg2', 'mut', 'grid', 'axis', 'card', 's1', 's2', 's3', 's4',
                               'good', 'warning', 'serious', 'critical', 'none'].map(k => [k, css('--' + k)]));
@@ -381,7 +424,28 @@ const ch = {
           { max: 62, ref: [{ v: 45, t: 'derate 45 °C' }, { v: 55, t: 'LIMP 55 °C' }, { v: 60, t: 'SAFE 60 °C' }] }),
   v: mk('c_v', [['Max group', 'v_max', C.s1], ['Min group', 'v_min', C.s2]], { dec: 3 }),
   soc: mk('c_soc', [['SOC', 'soc', C.s1]], { dec: 2 }),
+  psi: mk('c_psi', [['Ψ', 'psi_s', C.fg], ['Ψ_T', 'psi_t', C.s1], ['Ψ_C', 'psi_c', C.s2], ['Ψ_Tdot', 'psi_tdot', C.s3],
+                    ['Ψ_H', 'psi_h', C.s4]], { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3]] }),
 };
+const CRIT_COL = [C.s1, C.s2, C.s3, C.s4];
+$('crits').innerHTML = CRIT.map(([k, name, cap], i) =>
+  `<div class="crit" id="cr_${k}"><span>${name}</span><span class="tr"><i id="cb_${k}" style="background:${CRIT_COL[i]}"></i>` +
+  `<u style="left:calc(${100 * cap}% - 1px)" title="cap ${cap}"></u></span><b id="cv_${k}">—</b></div>`).join('') +
+  `<div class="crit dom"><span>Ψ (aggregate)</span><span class="tr"><i id="cb_psi_s" style="background:${C.fg}"></i></span><b id="cv_psi_s">—</b></div>`;
+// stres çubukları (Engineering): değer 0-1, baskın kriter kalın
+function crits(x) {
+  const has = x.psi_s != null;
+  $('psi_note').textContent = !has ? 'Needs the ECU built with BMS_TELEMETRY=2 (stress fields).'
+    : x.psi_dom ? `Dominant criterion: ${CRIT[x.psi_dom - 1][1]}. Thin marks show each criterion's cap; only core temperature can reach 1.`
+                : 'No stress: all criteria are zero. Thin marks show each criterion\'s cap.';
+  for (const [i, [k]] of CRIT.entries()) {
+    $('cb_' + k).style.width = `${100 * Math.min(1, x[k] ?? 0)}%`;
+    $('cv_' + k).textContent = f(x[k], 2);
+    $('cr_' + k).classList.toggle('dom', x.psi_dom === i + 1);
+  }
+  $('cb_psi_s').style.width = `${100 * Math.min(1, x.psi_s ?? 0)}%`;
+  $('cv_psi_s').textContent = f(x.psi_s, 2);
+}
 
 let draw = function () {
   if (!buf.length) return;
@@ -400,6 +464,9 @@ function kpis(x) {
   $('k_p').textContent = has && x.i_meas != null ? f(x.v_pack * x.i_meas / 1000, 1) : '—';
   $('k_ia').textContent = `${f(x.i_allow)} / ${f(x.i_chg)}`;
   $('k_psi').textContent = x.psi == null ? '—' : f(100 * x.psi, 0);
+  $('k_psis').textContent = x.psi_s == null ? '—' : f(100 * x.psi_s, 0);
+  $('k_td').textContent = x.tdot == null ? '—' : `${f(x.tdot, 1)} / ${f(x.k_r, 2)}`;
+  crits(x);
   $('k_tc').textContent = `${f(x.temp)} / ${f(x.ts)}`;
   $('k_tm').textContent = f(x.t_meas);
   $('k_vg').textContent = x.v_min == null ? '—' : `${f(x.v_min, 3)} / ${f(x.v_max, 3)}`;
@@ -417,7 +484,8 @@ async function live() {
     const j = await (await fetch(lastId ? `data.php?q=live&since=${lastId}` : `data.php?q=live&n=${MAXBUF}`)).json();
     for (const x of j.rows) {
       for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
-                       'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max']) x[k] = num(x[k]);
+                       'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h',
+                       'psi_s', 'psi_dom', 'tdot', 'k_r']) x[k] = num(x[k]);
       const p = buf[buf.length - 1];
       if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
       buf.push(x); lastId = Math.max(lastId, +x.id);
@@ -469,9 +537,11 @@ $('tabs').addEventListener('click', ev => {
 });
 $('csv').addEventListener('click', () => {
   const cols = ['t_ms', 'run_id', 'state', 'cause', 'soc', 'soh', 'temp', 'ts', 't_meas', 'i_meas', 'i_allow', 'i_chg', 'psi',
-                'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'rx_at'];
+                'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h', 'psi_s', 'psi_dom', 'tdot',
+                'k_r', 'rx_at'];
   const head = ['t_ms', 'run', 'state', 'cause', 'soc_pct', 'soh_pct', 'tc_est_C', 'ts_est_C', 't_meas_C', 'i_meas_A',
-                'i_allow_dis_A', 'i_allow_chg_A', 'psi', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec', 'rx_utc'];
+                'i_allow_dis_A', 'i_allow_chg_A', 'total_derating', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec',
+                'psi_T', 'psi_C', 'psi_Tdot', 'psi_H', 'psi', 'psi_dominant', 'dTdt_C_per_min', 'k_R', 'rx_utc'];
   const csv = [head.join(',')].concat(buf.map(r => cols.map(c => r[c] ?? '').join(','))).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -542,7 +612,8 @@ $('runs').addEventListener('click', ev => {
 const I_NOM_DIS = 7.275 * 12, I_NOM_CHG = 3.395 * 12, T_SCALE = 65;
 const REASON = [[1, 'the battery is warm'], [2, 'a cooling fault is suspected'], [4, 'a cell voltage is low'],
                 [8, 'a cell voltage is high'], [16, 'it is too warm to charge at full rate'], [32, 'a sensor has failed'],
-                [64, 'the battery is nearly empty'], [128, 'a hard safety limit was reached'], [256, 'unexplained heating was detected']];
+                [64, 'the battery is nearly empty'], [128, 'a hard safety limit was reached'], [256, 'unexplained heating was detected'],
+                [512, 'the temperature is rising quickly'], [1024, 'the cells have aged (higher resistance)']];
 const TITLE = ['Waiting for data', 'Battery OK', 'Power limited', 'Limp-home mode', 'Battery disconnected'];
 const BASE = ['', 'Full power is available.', '', 'Reduced power to reach a safe stop.', 'The contactor is open; no power is available.'];
 const ICON = ['·', '✓', '!', '!', '✕'];
@@ -551,6 +622,7 @@ const EVTXT = { BOOT: 'Battery controller started', NORMAL: 'Back to normal', DE
   SOP_DISCHARGE: 'Low cell voltage, power reduced', SOP_CHARGE: 'High cell voltage, charging reduced',
   DATASHEET_T_LIMIT: 'Charging limited by temperature', SENSOR_FAULT: 'Sensor fault', SOC_EMPTY: 'Battery nearly empty',
   HARD_LIMIT: 'Hard safety limit reached', THERMAL_ANOMALY: 'Unexplained heating detected', CAN_TIMEOUT: 'Measurements lost',
+  TEMP_RISE_RATE: 'Temperature rising quickly, power reduced', RESISTANCE_GROWTH: 'Cell ageing detected, power reduced',
   CONTACTOR_OPEN: 'Contactor opened', CONTACTOR_CLOSE: 'Contactor closed' };
 const pct = (v, m) => `${Math.max(0, Math.min(100, 100 * v / m))}%`;
 const kw = v => Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0);
@@ -598,6 +670,15 @@ function overview(x) {
     $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)`;
   } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
   $('o_soh_cap').textContent = `Battery health ${f(x.soh, 0)} %`;
+  // stres indeksi Ψ: sade dille baskın kriter; durum renkleri yalnız durum için, çubuk nötr
+  const ps = x.psi_s;
+  $('o_psi').textContent = ps == null ? '—' : f(100 * ps, 0);
+  $('o_psibar').style.width = pct(ps ?? 0, 1);
+  const main = x.psi_dom ? CRIT[x.psi_dom - 1][3] : null;
+  $('o_psi_cap').textContent = ps == null ? 'Needs wide telemetry'
+    : !main ? 'No stress: nothing is limiting the battery.'
+    : `Mainly from ${main}. ` + (st >= 3 ? 'Limp-home rules apply now.'
+                                         : `It lowers the power limit by ${f(100 * ps, 0)} %.`);
 }
 
 let lastEv = [];

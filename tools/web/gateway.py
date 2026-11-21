@@ -14,7 +14,10 @@ STM32 UART satırları (115200, \n, ondalık nokta):
   RS,<run>,<name>                                                senaryo (Monte Carlo koşusu) başladı
   RE,<run>,<PASS|FAIL>,<summary...>                              senaryo bitti
   DX,<ms>,<state>,<cause>,<soc>,<Tc>,<Ts>,<Idis>,<Ichg>,<psi>,<soh>,<I>,<V>,<T>,<Vmin>,<Vmax>
-                                    geniş satır (BMS_TELEMETRY=2): aynı adımın D satırına eklenir (t_ms eşleşmesi)
+     [,<Psi_T>,<Psi_C>,<Psi_Tdot>,<Psi_H>,<Psi>,<dom>,<dT/dt C/min>,<k_R>]
+                                    geniş satır (BMS_TELEMETRY=2): aynı adımın D satırına eklenir (t_ms eşleşmesi).
+                                    psi = toplam kısıtlama 1 - I_allow/I_nom; Psi = çok kriterli stres indeksi,
+                                    dom = baskın kriter (0 yok, 1 T, 2 C, 3 Tdot, 4 H); son 8 alan yoksa NULL
 Diğer satırlar (ECU 1 s raporu, MC,READY/DONE) yalnız log'a yazılır.
 PC -> STM32 komutları (klavyeden, APP_MC):  RUN <id>  |  ALL [n]  |  STOP
 
@@ -149,12 +152,16 @@ def parse(line: str):
             return "events", dict(t=int(p[1]), run=int(p[2]), code=p[3], detail=",".join(p[4:]))
         if p[0] == "RS" and len(p) >= 3:
             return "runs", dict(op="start", id=int(p[1]), name=",".join(p[2:]))
-        if p[0] == "DX" and len(p) == 16:
+        if p[0] == "DX" and len(p) in (16, 24):
             # soc ve T (Tc) D'de 1, DX'te 2 ondalık: DX değeri D'ninkinin yerine geçer
-            return "dx", dict(t=int(p[1]), cause=int(p[3]), soc=float(p[4]), T=float(p[5]), ts=float(p[6]),
-                              i_chg=float(p[8]), psi=float(p[9]),
-                              i_meas=float(p[11]), v_pack=float(p[12]), t_meas=float(p[13]),
-                              v_min=float(p[14]), v_max=float(p[15]))
+            d = dict(t=int(p[1]), cause=int(p[3]), soc=float(p[4]), T=float(p[5]), ts=float(p[6]),
+                     i_chg=float(p[8]), psi=float(p[9]),
+                     i_meas=float(p[11]), v_pack=float(p[12]), t_meas=float(p[13]),
+                     v_min=float(p[14]), v_max=float(p[15]))
+            if len(p) == 24:                # çok kriterli stres indeksi (eski ECU görüntüsünde yok: NULL)
+                d.update(psi_t=float(p[16]), psi_c=float(p[17]), psi_tdot=float(p[18]), psi_h=float(p[19]),
+                         psi_s=float(p[20]), psi_dom=int(p[21]), tdot=float(p[22]), k_r=float(p[23]))
+            return "dx", d
         if p[0] == "RE" and len(p) >= 3:
             return "runs", dict(op="end", id=int(p[1]), result=p[2], summary=",".join(p[3:]))
     except ValueError:

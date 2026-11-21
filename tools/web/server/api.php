@@ -1,6 +1,7 @@
 <?php
 // POST JSON: {"rows":[...], "events":[...], "runs":[...], "meta":{...}}  Header: X-API-Key  (SQLite, config.php)
-// rows: run,t,soc,soh,T,I,st,tec,rec + isteğe bağlı geniş alanlar (cause,ts,i_chg,psi,i_meas,v_pack,t_meas,v_min,v_max)
+// rows: run,t,soc,soh,T,I,st,tec,rec + isteğe bağlı geniş alanlar (cause,ts,i_chg,psi,i_meas,v_pack,t_meas,v_min,v_max,
+//       psi_t,psi_c,psi_tdot,psi_h,psi_s,psi_dom,tdot,k_r: config.php TELEMETRY_X)
 // meta (isteğe bağlı, gateway.py): seq, sent_ms, rx_first, rx_last, uart_missing, uart_bad, jit_ms,
 // prev_rtt_ms, prev_age_ms, resent. seq <= en son kabul edilen seq ise tekrar oynatma: 409, hiçbir şey yazılmaz.
 // meta'sız istemci (esp_gateway) kabul edilir; link tablosuna yalnız sayılar yazılır.

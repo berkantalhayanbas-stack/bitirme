@@ -16,7 +16,9 @@ function db_file(): string {
 
 // geniş satır kolonları: kolon => SQLite tipi (gateway alan adı api.php'de)
 const TELEMETRY_X = ['cause' => 'INTEGER', 'ts' => 'REAL', 'i_chg' => 'REAL', 'psi' => 'REAL', 'i_meas' => 'REAL',
-                     'v_pack' => 'REAL', 't_meas' => 'REAL', 'v_min' => 'REAL', 'v_max' => 'REAL'];
+                     'v_pack' => 'REAL', 't_meas' => 'REAL', 'v_min' => 'REAL', 'v_max' => 'REAL',
+                     'psi_t' => 'REAL', 'psi_c' => 'REAL', 'psi_tdot' => 'REAL', 'psi_h' => 'REAL',
+                     'psi_s' => 'REAL', 'psi_dom' => 'INTEGER', 'tdot' => 'REAL', 'k_r' => 'REAL'];
 
 function db(): PDO {
     static $pdo = null;

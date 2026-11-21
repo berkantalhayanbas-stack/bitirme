@@ -19,9 +19,12 @@ CREATE TABLE IF NOT EXISTS telemetry (
   rx_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   -- geniş satır (DX, BMS_TELEMETRY=2); yoksa NULL. Eski tabloya config.php db() ALTER ile ekler.
   cause    INTEGER,                                  -- neden bitleri (bms_algo.h)
-  ts REAL, i_chg REAL, psi REAL,                     -- yüzey kestirimi, şarj I_allow, derating oranı
+  ts REAL, i_chg REAL, psi REAL,                     -- yüzey kestirimi, şarj I_allow, toplam kısıtlama 1 - I_allow/I_nom
   i_meas REAL, v_pack REAL, t_meas REAL,             -- 0x101 ölçümü: akım (+ deşarj), paket gerilimi, sıcaklık
-  v_min REAL, v_max REAL                             -- 0x102: en düşük / en yüksek grup gerilimi
+  v_min REAL, v_max REAL,                            -- 0x102: en düşük / en yüksek grup gerilimi
+  psi_t REAL, psi_c REAL, psi_tdot REAL, psi_h REAL, -- stres alt indeksleri: çekirdek T, soğutma, dT/dt, direnç (k_R)
+  psi_s REAL, psi_dom INTEGER,                       -- çok kriterli stres indeksi Ψ, baskın kriter (0 yok, 1 T, 2 C, 3 Tdot, 4 H)
+  tdot REAL, k_r REAL                                -- süzülmüş yüzey dT/dt (°C/dk), EKF R0 ölçeği
 );
 CREATE INDEX IF NOT EXISTS telemetry_run ON telemetry (run_id, t_ms);
 
