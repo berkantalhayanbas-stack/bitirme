@@ -49,6 +49,23 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define TH_R            (0.3f * 0.3f + 0.1f * 0.1f / 12.0f)
 #define TH_G_MIN        (0.2f / CELL_RU)
 
+/* ---- termal anomali dedektörü (açıklanamayan ısı; HIL A2 bulgusu, 2026-11-21) ----
+ * Gözlemci yalnız Ts'yi ölçer ve ısıyı I^2R + ortamla açıklar; gizli bir kaynak (dış ısı, iç kısa
+ * devre başlangıcı) g'yi alt sınıra iter, Tc düşük kalır. "Adyabatik zarf": bilinen ısının üst sınırı
+ * (TA_Q_K x + TA_Q_OFF) ve SOĞUTMA YOK (Ta > Ts ise en güçlü ısıtma g = TA_G_MAX) ile Ts'nin
+ * çıkabileceği en yüksek değer. İki kaydırmalı pencere (TA_WIN, yarım periyot kayık), ölçümden
+ * yeniden başlar. Süzülmüş ölçüm zarfı TA_R_TH aşar, TA_N örnek sürerse anomali (kilitlenir). */
+#define TA_WIN          1200        /* 120 s pencere [örnek] */
+#define TA_AGE_MIN      100         /* zarf en az 10 s yaşlı olmalı [örnek] */
+#define TA_R_TH         1.5f        /* [°C] */
+#define TA_N            10          /* 1 s */
+#define TA_ALPHA        0.1f        /* ölçüm süzgeci (~1 s) */
+#define TA_Q_K          1.5f        /* bilinen ısı payı (R0/ısı kapasitesi belirsizliği) */
+#define TA_Q_OFF        0.2f        /* [W/hücre] */
+#define TA_TC0          1.0f        /* [°C] zarf başlangıç payları: Tc = max(Tc_hat, Tm) + TA_TC0 */
+#define TA_TS0          0.5f        /*       Ts = Tm + TA_TS0 */
+#define TA_G_MAX        (4.0f / CELL_RU)
+
 /* ---- sensör teşhisi ---- */
 #define DIAG_T_MIN      (-30.0f)
 #define DIAG_T_MAX      85.0f

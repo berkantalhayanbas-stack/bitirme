@@ -34,6 +34,7 @@ typedef struct {
     float    min_soc, max_tc, soc_err;   /* en düşük grup SOC'si, en yüksek gerçek çekirdek, en büyük |SOC hatası| */
     float    tc_limp, tc_safe;           /* LIMP / SAFE anında gerçek çekirdek sıcaklığı (-99 = yok) */
     int32_t  t_limp, t_safe, t_cool, t_sens;   /* ilk LIMP / SAFE / soğutma alarmı / sensör nedeni [ms], -1 yok */
+    int32_t  t_anom;                     /* ilk termal anomali (neden 256) [ms], -1 yok */
     const char *why;                     /* FAIL nedeni (PASS'te "-") */
 } mc_res_t;
 

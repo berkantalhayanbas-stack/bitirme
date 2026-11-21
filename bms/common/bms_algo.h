@@ -36,6 +36,17 @@ void thermal_start(thermal_t *t, float T_meas);
 void thermal_step(thermal_t *t, float i_meas, float v_meas, float soc_est, float T_meas,
                   float T_amb, uint8_t T_valid);
 
+/* ------------------------------------------------------------ termal anomali (açıklanamayan ısı) */
+typedef struct {
+    float tc[2], ts[2];  /* iki adyabatik zarf */
+    int   age[2], k, n;
+    float t_f;           /* süzülmüş ölçüm */
+    uint8_t started, flag;   /* flag kilitlenir (yeniden başlatmaya kadar) */
+} tanom_t;
+void    tanom_init(tanom_t *a);
+uint8_t tanom_step(tanom_t *a, float i_meas, float v_meas, float soc_est, float T_meas, float T_amb,
+                   float Tc_hat, uint8_t T_valid);
+
 /* ------------------------------------------------------------ sensör teşhisi */
 typedef struct {
     float t_prev, i_prev, t_lp;     /* t_lp: değişim hızı teşhisi için hızlı süzgeç */
@@ -74,7 +85,9 @@ void decision_init(decision_t *d);
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   decision_out_t *o);
+                   uint8_t T_anom, decision_out_t *o);
+/* cause bitleri: 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş,
+ * 128 sert sınır, 256 termal anomali (0x201'de cause 8 bit: anomali bit 1'i de kurar) */
 
 /* ------------------------------------------------------------ ML: SOH ağacı */
 float soh_tree(float efc, float days, float T, float m, float dod, float rr);
@@ -88,12 +101,12 @@ typedef struct {
     float soc, bias, innov;
     uint8_t rejected;
     float tc, ts, ru;
-    uint8_t t_valid, i_valid;
+    uint8_t t_valid, i_valid, t_anom;
     float rr;
     decision_out_t dec;
 } bms_out_t;
 typedef struct {
-    ekf_t ekf; thermal_t th; diag_t diag; rint_t rint; decision_t dec;
+    ekf_t ekf; thermal_t th; tanom_t ta; diag_t diag; rint_t rint; decision_t dec;
 } bms_t;
 void bms_init(bms_t *b, float soc0_ekf, float q_scale, float r_scale, float rint_num0, float rint_den0);
 void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *out);

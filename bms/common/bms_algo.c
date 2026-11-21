@@ -198,6 +198,39 @@ void thermal_step(thermal_t *t, float i_meas, float v_meas, float soc_est, float
         }
 }
 
+/* =================================================================== termal anomali */
+void tanom_init(tanom_t *a) { memset(a, 0, sizeof(*a)); }
+
+uint8_t tanom_step(tanom_t *a, float i_meas, float v_meas, float soc_est, float T_meas, float T_amb,
+                   float Tc_hat, uint8_t T_valid)
+{
+    if (!T_valid) { a->started = 0;  a->n = 0;  return a->flag; }   /* ölçüm dönünce baştan */
+    if (!a->started) {                       /* ilk adımda iki zarf da başlar */
+        a->t_f = T_meas;  a->k = 0;  a->started = 1;  a->age[0] = a->age[1] = -1;
+    }
+    a->t_f += TA_ALPHA * (T_meas - a->t_f);
+    const float ic = i_meas / BMS_NP;
+    const float q = maxf(ic * (polyval(OCV_POLY, OCV_POLY_N, clampf(soc_est, 0.0f, 1.0f)) - v_meas / BMS_NS), 0.0f)
+                  * TA_Q_K + TA_Q_OFF;
+    float r = -1e9f;
+    for (int j = 0; j < 2; j++) {
+        if (a->k == j * (TA_WIN / 2) || a->age[j] < 0) {   /* kaydırmalı yeniden başlatma */
+            a->tc[j] = maxf(Tc_hat, a->t_f) + TA_TC0;  a->ts[j] = a->t_f + TA_TS0;  a->age[j] = 0;
+        }
+        const float tc = a->tc[j], ts = a->ts[j], g = (T_amb > ts) ? TA_G_MAX : 0.0f;
+        a->tc[j] = tc + BMS_TS / CELL_CC * (q + (ts - tc) / CELL_RC);
+        a->ts[j] = ts + BMS_TS / CELL_CS * (g * (T_amb - ts) - (ts - tc) / CELL_RC);
+        a->age[j]++;
+        if (a->age[j] >= TA_AGE_MIN) r = maxf(r, a->t_f - a->ts[j]);
+    }
+    a->k = (a->k + 1) % TA_WIN;
+    if (r > -1e8f) {
+        a->n = (r > TA_R_TH) ? a->n + 1 : 0;
+        if (a->n >= TA_N) a->flag = 1;
+    }
+    return a->flag;
+}
+
 /* =================================================================== sensör teşhisi */
 void diag_init(diag_t *d)
 {
@@ -280,7 +313,7 @@ static uint8_t band(uint8_t f, float ratio)
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   decision_out_t *o)
+                   uint8_t T_anom, decision_out_t *o)
 {
     const float I_nom_dis = 7.275f * BMS_NP, I_nom_chg = 3.395f * BMS_NP;
 
@@ -344,14 +377,14 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     const uint8_t sensor_bad = !T_valid || !I_valid || fabsf(bias_est) > DEC_BIAS_MAX || d->zero_bad;
     const uint8_t empty = SOC_est < DEC_SOC_EMPTY;
     const uint8_t hot_ss = d->n_hl >= DEC_N_HARD;
-    const uint8_t limp = sensor_bad || Tc_hat > DEC_T_LIMP || hot_ss || empty;
+    const uint8_t limp = sensor_bad || Tc_hat > DEC_T_LIMP || hot_ss || empty || T_anom;
     if (limp) {
         tgt_dis = minf(minf(DEC_FLOOR * I_nom_dis, i_ds_dis), maxf(sop_dis, 0.f));
         tgt_chg = minf(tgt_chg, DEC_FLOOR * I_nom_chg);
     }
     const uint16_t cause = (psi_T > 0.f || hot_ss ? 1 : 0) | (psi_C > 0.f ? 2 : 0) | (d->f_sop_dis ? 4 : 0)
                          | (d->f_sop_chg ? 8 : 0) | (d->f_ds ? 16 : 0) | (sensor_bad ? 32 : 0)
-                         | (empty ? 64 : 0);
+                         | (empty ? 64 : 0) | (T_anom ? (256 | 1) : 0);
 
     /* ---- durum + histerezis ---- */
     const uint8_t want = limp ? ST_LIMP : (cause ? ST_DERATE : ST_NORMAL);
@@ -378,6 +411,7 @@ void bms_init(bms_t *b, float soc0_ekf, float q_scale, float r_scale, float rint
 {
     ekf_init(&b->ekf, soc0_ekf, q_scale, r_scale);
     thermal_init(&b->th);
+    tanom_init(&b->ta);
     diag_init(&b->diag);
     rint_init(&b->rint, rint_num0, rint_den0);
     decision_init(&b->dec);
@@ -399,11 +433,19 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
     o->soc = b->ekf.x[0];
     o->bias = b->ekf.x[3];
 
+    const float g_prev = b->th.x[2];
     thermal_step(&b->th, in->I, in->V, o->soc, in->T, in->T_amb, o->t_valid);
+    /* termal anomali: g donar (gizli ısı soğutma arızası sanılmasın), Tc ölçüme bağlı kararlı
+     * hal sınırının altına inmez (iç kaynakta çekirdek yüzeyden sıcak) */
+    o->t_anom = tanom_step(&b->ta, in->I, in->V, o->soc, in->T, in->T_amb, b->th.x[0], o->t_valid);
+    if (o->t_anom) {
+        b->th.x[2] = g_prev;
+        if (o->t_valid) b->th.x[0] = maxf(b->th.x[0], in->T + DEC_K_SS * (in->T - in->T_amb));
+    }
     o->tc = b->th.x[0];  o->ts = b->th.x[1];  o->ru = 1.0f / b->th.x[2];
 
     o->rr = rint_step(&b->rint, in->I, in->V, o->tc, o->soc, o->i_valid);
 
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
-                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, &o->dec);
+                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, &o->dec);
 }

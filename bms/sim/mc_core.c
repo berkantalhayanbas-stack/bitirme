@@ -71,7 +71,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     float i_dis = 0.0f, i_chg = 0.0f;
     r->min_soc = 2.0f;  r->max_tc = -99.0f;  r->soc_err = 0.0f;
     r->tc_limp = r->tc_safe = -99.0f;
-    r->t_limp = r->t_safe = r->t_cool = r->t_sens = -1;
+    r->t_limp = r->t_safe = r->t_cool = r->t_sens = r->t_anom = -1;
     bms_out_t o = { 0 };
     int32_t tf = -1;                                  /* ilk arızalı örneğin zamanı [ms] */
 
@@ -115,6 +115,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
         if (o.dec.state == ST_SAFE && r->t_safe < 0) { r->t_safe = t_ms;  r->tc_safe = tw.tc; }
         if ((o.dec.cause & 2u) && r->t_cool < 0) r->t_cool = t_ms;
         if ((o.dec.cause & 32u) && r->t_sens < 0) r->t_sens = t_ms;
+        if ((o.dec.cause & 256u) && r->t_anom < 0) r->t_anom = t_ms;
     }
     r->final_state = o.dec.state;
 
@@ -127,7 +128,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     if (r->soc_err > 0.04f) { ok = 0; r->why = "soc_err"; }
     switch (c->fault) {
     case MC_F_NONE:
-        if (r->t_limp >= 0 || r->t_safe >= 0 || r->t_cool >= 0 || r->t_sens >= 0) { ok = 0; r->why = "false_alarm"; }
+        if (r->t_limp >= 0 || r->t_safe >= 0 || r->t_cool >= 0 || r->t_sens >= 0 || r->t_anom >= 0) { ok = 0; r->why = "false_alarm"; }
         break;
     case MC_F_COOL:                       /* güvenlik: çekirdek 55 °C'yi aşmaz, SAFE yok; tepki = alarm */
         if (r->t_cool >= 0) r->react_ms = r->t_cool - tf;
@@ -135,12 +136,13 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
         if (r->t_safe >= 0) { ok = 0; r->why = "unexpected_safe"; }
         if (r->t_sens >= 0) { ok = 0; r->why = "false_sensor"; }
         break;
-    case MC_F_HEAT:                       /* LIMP gerçek çekirdek <= 57 °C, SAFE <= 62 °C */
-        if (r->t_safe >= 0) r->react_ms = r->t_safe - tf;
+    case MC_F_HEAT:                       /* anomali 15 s içinde; LIMP gerçek çekirdek <= 57 °C, SAFE <= 62 °C */
+        if (r->t_anom >= 0) r->react_ms = r->t_anom - tf;
         if (r->t_safe < 0) { ok = 0; r->why = "no_safe"; }
         else if (r->tc_safe > 62.0f) { ok = 0; r->why = "late_safe"; }
         if (r->t_limp < 0 && r->t_safe >= 0 && r->tc_safe > 57.0f) { ok = 0; r->why = "no_limp"; }
         if (r->t_limp >= 0 && r->tc_limp > 57.0f) { ok = 0; r->why = "late_limp"; }
+        if (r->t_anom < 0 || r->react_ms > 15000) { ok = 0; r->why = "no_anomaly"; }
         break;
     case MC_F_NTC:                        /* 0,5 s içinde sensör nedeniyle LIMP, SAFE yok */
         if (r->t_sens >= 0) r->react_ms = r->t_sens - tf;
@@ -157,6 +159,7 @@ void mc_run(const mc_cfg_t *c, mc_res_t *r)
     if (c->fault != MC_F_OFFSET && c->fault != MC_F_NTC && c->fault != MC_F_NONE && r->t_sens >= 0) {
         ok = 0; r->why = "false_sensor";
     }
+    if (c->fault != MC_F_HEAT && r->t_anom >= 0) { ok = 0; r->why = "false_anomaly"; }
     r->pass = ok;
 }
 

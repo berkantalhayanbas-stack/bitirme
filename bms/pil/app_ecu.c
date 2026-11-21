@@ -116,6 +116,7 @@ static const char *boot_reason = "";
 #define RXS_N 16u
 static struct { uint16_t id; uint8_t len, d[8]; } rxs[RXS_N];
 static uint32_t rxs_h, rxs_t, rxs_drop;
+#if BMS_OUTPUTS
 static void can_stash(void)
 {
     uint16_t id;  uint8_t d[8], len;
@@ -125,6 +126,7 @@ static void can_stash(void)
     }
     if (((rxs_h + 1u) % RXS_N) == rxs_t) rxs_drop++;          /* dolu (olmamalı) */
 }
+#endif
 static int can_get(uint16_t *id, uint8_t *d, uint8_t *len)
 {
     if (rxs_t == rxs_h) return bsp_can_recv(id, d, len);
@@ -212,8 +214,9 @@ static void apply_outputs(uint8_t state, float i_allow_dis)
  * E,<t_ms>,0,<code>,<detail>: açılış, durum geçişi, neden bitinin yükselmesi, CAN kaybı, kontaktör.
  * Yalnız değişimde yazılır (10 Hz satırın yanında birkaç bayt). */
 static const char *const ST_CODE[5] = { "-", "NORMAL", "DERATE", "LIMP_HOME", "SAFE_STOP" };
-static const char *const CAUSE_CODE[7] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
-                                           "SOP_CHARGE", "DATASHEET_T_LIMIT", "SENSOR_FAULT", "SOC_EMPTY" };
+static const char *const CAUSE_CODE[9] = { "THERMAL_DERATE", "COOLING_ALARM", "SOP_DISCHARGE",
+                                           "SOP_CHARGE", "DATASHEET_T_LIMIT", "SENSOR_FAULT", "SOC_EMPTY",
+                                           "HARD_LIMIT", "THERMAL_ANOMALY" };
 static void ev(uint32_t t_ms, const char *code)
 {
     put_s("E,");  put_u(t_ms);  put_s(",0,");  put_s(code);  put_s(",");
@@ -232,8 +235,10 @@ static void events(uint32_t t_ms, uint8_t state, uint16_t cause, float tc, uint8
         kv(" cause=", cause);  kf(" Tc=", tc);  put_s("\r\n");
     }
     const uint16_t up = (uint16_t)(cause & ~cause_prev);
-    for (int b = 0; b < 7; b++)
-        if (up & (1u << b)) { ev(t_ms, CAUSE_CODE[b]);  kf("Tc=", tc);  put_s("\r\n"); }
+    for (int b = 0; b < 9; b++)
+        if (b != 7 && (up & (1u << b))) {                   /* 7 sert sınır: SAFE_STOP olayı yeter */
+            ev(t_ms, CAUSE_CODE[b]);  kf("Tc=", tc);  put_s("\r\n");
+        }
     if (can_prev && !can_ok) { ev(t_ms, "CAN_TIMEOUT");  put_s("measurement frames lost\r\n"); }
 #if BMS_OUTPUTS
     if (out_k != k_prev) { ev(t_ms, out_k ? "CONTACTOR_CLOSE" : "CONTACTOR_OPEN");  put_s("-\r\n"); }
