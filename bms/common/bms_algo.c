@@ -100,6 +100,7 @@ void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, u
         S += C[r] * s;
     }
     for (int r = 0; r < EKF_N; r++) K[r] = PC[r] / S;
+    if (e->n_kr < EKF_N_KR_FREEZE) { e->n_kr++;  K[4] = 0.0f; }   /* SOC yakınsıyor: k_R dondur (Joseph formu tutarlı) */
     *innov = v_meas - y_hat;
 
     *rejected = (fabsf(*innov) > EKF_GATE * sqrtf(S)) && (e->n_rej < EKF_N_REJ);
@@ -338,11 +339,15 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
         d->td_on = 0;  d->tdot = 0.0f;
     }
     const float psi_D = DEC_PSI_TDOT * clampf((d->tdot - DEC_TDOT_ON) / (DEC_TDOT_FULL - DEC_TDOT_ON), 0.f, 1.f);
-    const float psi_H = DEC_PSI_HEALTH * clampf((k_R - DEC_KR_ON) / (DEC_KR_FULL - DEC_KR_ON), 0.f, 1.f);
+    /* Ψ_H yalnız gösterge (2026-11-22): psi_i'de ve neden 1024'te görünür, Ψ toplamına / baskın kritere /
+     * duruma girmez. Yaşlanmış paketin akımını SOP zaten k_R ölçekli R0 ile kısar. Açılıştan 120 s sonra
+     * (EKF k_R de 120 s donuk, EKF_N_KR_FREEZE). */
+    const float psi_H = d->n_run < DEC_N_COOL_BLANK ? 0.0f
+                      : DEC_PSI_HEALTH * clampf((k_R - DEC_KR_ON) / (DEC_KR_FULL - DEC_KR_ON), 0.f, 1.f);
     o->psi_i[PSI_T] = psi_T;  o->psi_i[PSI_C] = psi_C;  o->psi_i[PSI_TDOT] = psi_D;  o->psi_i[PSI_H] = psi_H;
     float pm = 0.0f, ps = 0.0f;
     o->dom = 0;
-    for (int i = 0; i < PSI_N; i++) {       /* ilk en büyük (Python index() ile aynı) */
+    for (int i = 0; i < PSI_H; i++) {       /* ilk en büyük (Python index() ile aynı); Ψ_H hariç */
         ps += o->psi_i[i];
         if (o->psi_i[i] > pm) { pm = o->psi_i[i];  o->dom = (uint8_t)(i + 1); }
     }
@@ -415,7 +420,7 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
                          | (psi_H > 0.f ? 1024 : 0);
 
     /* ---- durum + histerezis ---- */
-    const uint8_t want = limp ? ST_LIMP : (cause ? ST_DERATE : ST_NORMAL);
+    const uint8_t want = limp ? ST_LIMP : ((cause & ~1024u) ? ST_DERATE : ST_NORMAL);   /* 1024 bilgi */
     if (want > d->state) {
         d->state = want;  d->n_ok = 0;
     } else if (want < d->state) {

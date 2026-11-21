@@ -37,6 +37,10 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define EKF_Q           { 1e-10f, 1e-6f, 1e-6f, 1e-8f, 1e-8f }
 #define EKF_KR_MIN      0.5f        /* k_R = gerçek R0 / nominal R0 sınırları */
 #define EKF_KR_MAX      2.0f
+#define EKF_N_KR_FREEZE 1200        /* 120 s: açılışta k_R kazancı 0. SOC yakınsamadan (EKF %50'den başlar)
+                                     * gerilim farkı direnç artışı sanılıp k_R tavana (2,0) çıkıyordu
+                                     * (kart buton testi 2026-11-21: servisten 5 s sonra şarj); SOP
+                                     * direnci de buna bağlı. Python ekf.py kr_freeze_s, MATLAB ekf_soc.m. */
 #define EKF_P_B0        0.05f       /* [A^2] sıfır akım kalibrasyonundan sonra kayma belirsizliği
                                        (10 örnek ortalaması: si^2/10 ~ 0,025) */
 #define EKF_R           (0.25f * 0.25f)
@@ -98,7 +102,7 @@ static const float OCV_POLY[OCV_POLY_N] = {
  * bitirme veri/age_resistance.py), EKF k_R gerçeğin ~%3-4 üstünde: 1,2 = SOH ~%86, 1,3 = SOH ~%80
  * (ömür sonu). Önceki tam nokta 1,6 = SOH ~%55, kullanım ömrünün dışı. */
 #define DEC_KR_ON       1.2f        /* Ψ_H: EKF R0 ölçeği k_R */
-#define DEC_KR_FULL     1.3f
+#define DEC_KR_FULL     1.3f        /* Ψ_H açılıştan DEC_N_COOL_BLANK (120 s) sonra */
 #define DEC_PSI_HEALTH  0.3f        /* Ψ_H tavanı */
 #define DEC_KR_SOP_MAX  2.0f        /* SOP direnci R0 · clamp(k_R, 1, 2) · Arrhenius(T) */
 #define DEC_KAPPA       0.25f       /* toplama ağırlığı (0: eski max) */

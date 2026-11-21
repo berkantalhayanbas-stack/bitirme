@@ -15,6 +15,7 @@ typedef struct {
     float r0_ref, r1, r2, a1, a2, q_ah;
     int   n_rej;
     int   n_zero;        /* açılış sıfır akım kalibrasyonu (A9) */
+    int   n_kr;          /* açılıştan beri adım (k_R dondurma, EKF_N_KR_FREEZE) */
     float i0_sum;
 } ekf_t;
 void  ekf_init(ekf_t *e, float soc0, float q_scale, float r_scale);
