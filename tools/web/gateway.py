@@ -19,7 +19,7 @@ Diğer satırlar (ECU 1 s raporu, MC,READY/DONE) yalnız log'a yazılır.
 PC -> STM32 komutları (klavyeden, APP_MC):  RUN <id>  |  ALL [n]  |  STOP
 
 Bağlantı kalitesi (tez: gecikme ve kayıp ölçülerek raporlanır):
-  - UART kaybı: aynı run'da ardışık D satırlarının t_ms farkı, görülen en küçük periyodun 1,5 katını
+  - UART kaybı: aynı run'da ardışık D satırlarının t_ms farkı, son 21 aralığın medyanının 1,5 katını
     aşarsa eksik satır sayılır (1 s'den uzun boşluk kayıp değil ECU duraklamasıdır: ECU adımı ölçüm
     çiftiyle atar, EMU susunca satır da gelmez); "D," ile başlayıp ayrıştırılamayan satır bozuk sayılır.
   - UART titreşimi (yalnız run 0, t_ms gerçek zaman): (PC alış zamanı - t_ms) - son 5 s'deki en küçüğü
@@ -29,6 +29,13 @@ Bağlantı kalitesi (tez: gecikme ve kayıp ölçülerek raporlanır):
     jit_ms ve önceki yığının rtt/age değerleri; api.php bunları link tablosuna yazar, seq <= son seq
     olan yığını tekrar oynatma sayıp reddeder (409).
   - build/web/link_*.csv yığın başına satır; Ctrl+C ile özet (p50/p95/max).
+
+Mod butonları (isteğe bağlı, --emu COM10): twin_emu'nun seri portu da okunur. Her basışta Uno
+"B,<olay>,<1|0>" yazar; gateway bunu "BUTTON" olayı olarak gönderir ve ECU'nun D satırlarındaki
+durumu izleyip beklenen moda geçiş süresini "REACTION" olayı olarak ekler (PC saatiyle, 0,1 s
+çözünürlük). ECU senaryoyu bilmez. COM10'u açmak Uno'yu sıfırlar (~2 s susar: ECU SAFE'e düşer,
+NORMAL butonuyla dönülür). Klavyeden "emu <komut>" Uno'ya gider (ör. emu k 2), diğerleri ECU'ya.
+demo_run.py COM10'u kullandığı için --emu ile aynı anda çalışmaz.
 """
 import collections
 import csv
@@ -47,7 +54,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 URL = os.environ.get("BMS_URL", "https://hizlipdf.net/bitirmeprj/api.php")
 KEY_FILE = HERE / "api_key.txt"
 API_KEY = os.environ.get("BMS_API_KEY") or (KEY_FILE.read_text().strip() if KEY_FILE.exists() else "")
-PORT = sys.argv[1] if len(sys.argv) > 1 else "COM9"
+ARGS = [a for a in sys.argv[1:]]
+EMU_PORT = None
+if "--emu" in ARGS:                                     # gateway.py COM9 --emu COM10
+    i = ARGS.index("--emu")
+    EMU_PORT = ARGS[i + 1]
+    del ARGS[i:i + 2]
+PORT = ARGS[0] if ARGS else "COM9"
 BAUD = 115200
 SEND_PERIOD = 1.0                                       # s
 JIT_WIN = 5000                                          # ms, titreşim taban penceresi (saat kaymasını ayıklar)
@@ -58,6 +71,7 @@ SPOOL = OUT / "spool.jsonl"                             # internet yoksa yerel k
 STAMP = time.strftime('%Y%m%d_%H%M%S')
 LOG = OUT / f"log_{STAMP}.txt"
 LINK_CSV = OUT / f"link_{STAMP}.csv"
+EMU_LOG = OUT / f"emu_{STAMP}.txt"                     # --emu: Uno satırları (R raporu, B basışları)
 
 lock = threading.Lock()
 buf = {"rows": [], "events": [], "runs": []}
@@ -69,7 +83,7 @@ now_ms = lambda: int(time.time() * 1000)
 class Uart:
     """Yığın süresince UART tarafı sayaçları (sender her yığında sıfırlar)."""
     def __init__(self):
-        self.last = {}              # run -> [son t_ms, en küçük periyot]
+        self.last = {}              # run -> [son t_ms, son 21 aralık (periyot = medyan)]
         self.offs = collections.deque()   # run 0: son JIT_WIN ms'nin (alış, alış - t_ms) çiftleri
         self.reset()
 
@@ -85,21 +99,24 @@ class Uart:
         if prev is not None:
             dt = t - prev[0]
             if dt <= 0:                                 # ECU yeniden başladı / koşu tekrarlandı
-                prev[1] = None
+                prev[1].clear()
                 if run == 0:
                     self.offs.clear()
             else:
-                per = dt if prev[1] is None else min(prev[1], dt)
+                # periyot = son aralıkların medyanı (en küçüğü alınırsa EMU yeniden başlayınca kayan faz
+                # tek bir kısa aralık, ör. 38 ms, bırakır ve sonraki her 100 ms aralığı "kayıp" sayılırdı)
+                d = sorted(prev[1])
+                per = d[len(d) // 2] if len(d) >= 3 else None
+                prev[1].append(dt)
                 if dt > PAUSE_MS:                       # ECU adım atmadı (ölçüm gelmedi: EMU sıfırlandı,
                     stats["ecu_pause"] += 1             # hat koptu): satır kaybı değil, ayrı sayılır
-                elif dt > 1.5 * per:
+                elif per is not None and dt > 1.5 * per:
                     m = round(dt / per) - 1
                     self.missing += m
                     stats["uart_missing"] += m
-                prev[1] = per
             prev[0] = t
         else:
-            self.last[run] = [t, None]
+            self.last[run] = [t, collections.deque(maxlen=21)]
         if run == 0:                                    # t_ms yalnız canlı modda gerçek zaman
             # titreşim = gecikme - son 5 s'nin en küçüğü: ECU ve PC saatleri arasındaki kayma
             # (ölçülen ~0,5 ms/s) oturum boyu birikip titreşim gibi görünmesin
@@ -245,11 +262,89 @@ def sender(writer):
               + (" UNAUTHORIZED (check API key)" if stats["unauthorized"] else "") + "   ", end="", flush=True)
 
 
-def keyboard(ser):
+def keyboard(ser, emu):
     for cmd in sys.stdin:
         cmd = cmd.strip()
-        if cmd:
+        if cmd.lower().startswith("emu ") and emu is not None:
+            emu.write((cmd[4:] + "\n").encode())
+        elif cmd:
             ser.write((cmd + "\n").encode())
+
+
+# ---------------------------------------------------------------- mod butonları (twin_emu B satırı)
+# olay -> (başladığında ad, kaldırıldığında ad, beklenen durum dizisi, zaman aşımı s)
+# durumlar: 1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP
+EV = {0: ("NORMAL: service restart", None, [1], 60),
+      1: ("DERATE: full-battery charge", "DERATE: charging stopped", [2], 60),
+      2: ("LIMP: temperature sensor cut", "LIMP: sensor repaired", [3], 60),
+      3: ("STOP: measurement line cut", "STOP: line repaired", [4], 60),
+      4: ("WATCHDOG: software hang", None, [4], 60),
+      5: ("DERATE (long): cooling fault", "DERATE (long): cooling repaired", [2], 900),
+      6: ("STOP (long): overheating", "STOP (long): heat source removed", [3, 4], 300)}
+ST_NAME = {1: "NORMAL", 2: "DERATE", 3: "LIMP-HOME", 4: "SAFE-STOP"}
+test = None                                             # bekleyen tepki ölçümü
+last_t = 0                                              # son D satırının t_ms'i (olay zamanı için)
+last_st = 0                                             # son D satırındaki ECU durumu
+
+
+def emu_reader(emu):
+    """Uno satırları: yalnız B,<olay>,<on> kullanılır (diğerleri yok sayılır)."""
+    global test
+    elog = EMU_LOG.open("w", encoding="utf-8", buffering=1)
+    while True:
+        try:
+            line = emu.readline().decode(errors="ignore").strip()
+        except serial.SerialException as e:
+            print(f"\nemu port closed: {e}")
+            return
+        if line:
+            elog.write(f"{now_ms()} {line}\n")
+        if not line.startswith("B,"):
+            continue
+        try:
+            _, ev, on = line.split(",")
+            ev, on = int(ev), int(on)
+        except ValueError:
+            continue
+        if ev not in EV:
+            continue
+        name_on, name_off, expect, tmo = EV[ev]
+        label = name_on if on or name_off is None else name_off
+        now = now_ms()
+        with lock:
+            exp = expect if on else []
+            detail = label + (f" (expect {ST_NAME[exp[0]]})" if exp else "")
+            buf["events"].append(dict(t=last_t, run=0, code="BUTTON", detail=detail))
+            # NORMAL servisi ECU'yu yeniden başlatır: önce yeniden başlamayı (t_ms geri gider) bekle
+            test = dict(label=label, expect=list(exp), t0=now, tmo=tmo, need_reset=(ev == 0)) if exp else None
+            if test and ev != 0 and last_st == exp[0]:          # ECU zaten o modda (ör. SAFE'teyken STOP)
+                buf["events"].append(dict(t=last_t, run=0, code="REACTION",
+                                          detail=f"{label} -> already in {ST_NAME[exp[0]]}"))
+                test = None
+        print(f"\n[button] {detail}")
+
+
+def track_reaction(row, rx):
+    """D satırında bekleyen basışın beklenen durumu geldi mi (sırayla; ör. LIMP sonra SAFE)."""
+    global test, last_t, last_st
+    restarted = row["t"] < last_t
+    last_t, last_st = row["t"], row["st"]
+    if test is None or row["run"] != 0:
+        return
+    dt = (rx - test["t0"]) / 1000.0
+    if test["need_reset"] and restarted:
+        test["need_reset"] = False
+    if not test["need_reset"] and row["st"] == test["expect"][0]:
+        name = ST_NAME[test["expect"].pop(0)]
+        buf["events"].append(dict(t=row["t"], run=0, code="REACTION",
+                                  detail=f"{test['label']} -> {name} in {dt:.1f} s"))
+        print(f"\n[reaction] {test['label']} -> {name} in {dt:.1f} s")
+        if not test["expect"]:
+            test = None
+    elif dt > test["tmo"]:
+        buf["events"].append(dict(t=row["t"], run=0, code="REACTION",
+                                  detail=f"{test['label']} -> no {ST_NAME[test['expect'][0]]} within {test['tmo']} s"))
+        test = None
 
 
 def pct(v, q):
@@ -279,12 +374,15 @@ def main():
     if not API_KEY:
         print("warning: no API key (set BMS_API_KEY or create tools/web/api_key.txt)")
     ser = serial.serial_for_url(PORT, BAUD, timeout=1)
+    emu = serial.serial_for_url(EMU_PORT, BAUD, timeout=1) if EMU_PORT else None
+    if emu is not None:
+        threading.Thread(target=emu_reader, args=(emu,), daemon=True).start()
     fcsv = LINK_CSV.open("w", newline="", encoding="utf-8", buffering=1)
     writer = csv.writer(fcsv)
     writer.writerow(["seq", "rows", "events", "status", "rtt_ms", "age_first_ms", "age_last_ms",
                      "uart_missing", "uart_bad", "jitter_ms", "resent"])
     threading.Thread(target=sender, args=(writer,), daemon=True).start()
-    threading.Thread(target=keyboard, args=(ser,), daemon=True).start()
+    threading.Thread(target=keyboard, args=(ser, emu), daemon=True).start()
     print(f"{PORT} -> {URL}  (commands: RUN <id> | ALL [n] | STOP), log {LOG}")
     try:
         with LOG.open("w", encoding="utf-8", buffering=1) as log:     # satır satır (kesilirse kaybolmasın)
@@ -312,6 +410,7 @@ def main():
                         if kind == "rows":
                             stats["rows_parsed"] += 1
                             uart.row(item, rx)
+                            track_reaction(item, rx)
                         buf[kind].append(item)
     except KeyboardInterrupt:
         pass

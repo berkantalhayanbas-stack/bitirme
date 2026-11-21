@@ -131,6 +131,9 @@ class H(BaseHTTPRequestHandler):
             return self.out({"rows": rows("SELECT t_ms,soc,soh,temp,i_allow,state,cause,ts,i_chg,i_meas,v_min,v_max FROM telemetry "
                                      "WHERE run_id=? ORDER BY t_ms", (i,)),
                              "events": rows("SELECT t_ms,code,detail FROM events WHERE run_id=? ORDER BY t_ms", (i,))})
+        if k == "tests":
+            return self.out(rows("SELECT id,t_ms,code,detail,rx_at FROM events WHERE code IN ('BUTTON','REACTION') "
+                                 "ORDER BY id DESC LIMIT 16"))
         if k == "linkhist":
             mn = max(1, min(1440, int(q.get("min", ["5"])[0])))
             now = int(time.time() * 1000)

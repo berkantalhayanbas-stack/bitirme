@@ -120,6 +120,11 @@
   ul.alerts li:last-child { border-bottom:0; }
   ul.alerts time { color:var(--mut); font-variant-numeric:tabular-nums; flex:none; width:64px; }
   .conn { margin:0; font-size:14px; line-height:1.7; color:var(--fg2); }
+  table.tests { font-size:14px; }
+  table.tests td:first-child { color:var(--mut); font-variant-numeric:tabular-nums; width:72px; }
+  .ok::before, .wait::before, .miss::before { display:inline-block; width:18px; font-weight:800; }
+  .ok::before { content:"✓"; color:var(--good); } .miss::before { content:"✕"; color:var(--critical); }
+  .wait::before { content:"…"; color:var(--mut); } .wait { color:var(--fg2); }
   .conn b { color:var(--fg); font-weight:600; }
 </style>
 </head>
@@ -170,6 +175,11 @@
   <section class="tile">
     <h3>Power used and available <span class="muted">· last minute</span></h3>
     <div class="plot" style="height:200px"><canvas id="c_pow"></canvas></div>
+  </section>
+  <section class="tile">
+    <h3>Button tests <span class="muted">· cause pressed on the test bench → mode the ECU chose by itself</span></h3>
+    <table class="tests"><thead><tr><th>Time</th><th>Button (cause)</th><th>ECU reaction</th></tr></thead>
+    <tbody id="tests"><tr><td colspan="3" class="muted">No button pressed yet</td></tr></tbody></table>
   </section>
   <div class="ovgrid two">
     <section class="tile"><h3>Recent alerts</h3><ul class="alerts" id="alerts"><li class="muted">None</li></ul></section>
@@ -592,13 +602,37 @@ function overview(x) {
 
 let lastEv = [];
 function alerts(evs) {
-  lastEv = evs.filter(e => +e.run_id === 0);
-  const L = evs.filter(e => +e.run_id === 0).slice(0, 6);
+  lastEv = evs.filter(e => +e.run_id === 0 && e.code !== 'BUTTON' && e.code !== 'REACTION');
+  const L = lastEv.slice(0, 6);
   $('alerts').innerHTML = L.length ? L.map(e => {
     const st = STATES.indexOf(String(e.code).replace('_', '-')), col = st > 0 ? ST_COL[st] : C.axis;
     const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
     return `<li><time>${t}</time><span class="dot" style="background:${col}"></span><span>${esc(EVTXT[e.code] ?? e.code)}</span></li>`;
   }).join('') : '<li class="muted">None</li>';
+}
+
+// buton testleri (gateway --emu): BUTTON = basış, REACTION = ECU'nun beklenen moda geçiş süresi
+async function tests() {
+  try {
+    const ev = (await (await fetch('data.php?q=tests')).json()).reverse();   // eskiden yeniye
+    const rows = [];
+    for (const e of ev) {
+      const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false });
+      if (e.code === 'BUTTON') {
+        const exp = /\(expect ([^)]+)\)/.exec(e.detail);
+        rows.push({ t, btn: e.detail.replace(/ \(expect [^)]+\)/, ''), res: exp ? `waiting for ${exp[1]}…` : '—', cls: exp ? 'wait' : '' });
+      } else {
+        const [btn, res] = String(e.detail).split(' -> ');
+        const r = [...rows].reverse().find(x => x.btn === btn);       // aynı basışın 2. tepkisi (LIMP sonra SAFE) yanına
+        const miss = /^no /.test(res ?? '');
+        if (r) { r.res = (r.cls === 'wait' ? '' : r.res + ' · ') + res; r.cls = miss ? 'miss' : 'ok'; }
+        else rows.push({ t, btn, res, cls: miss ? 'miss' : 'ok' });
+      }
+    }
+    $('tests').innerHTML = rows.length ? rows.reverse().slice(0, 8).map(r =>
+      `<tr><td>${esc(r.t)}</td><td>${esc(r.btn)}</td><td class="${r.cls}">${esc(r.res)}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="muted">No button pressed yet</td></tr>';
+  } catch (e) {}
 }
 
 // güç eğrisi (kW, tek eksen): kullanılan + sürüş ve şarj için izin verilen
@@ -618,7 +652,8 @@ draw = function () {
 };
 try { const v = localStorage.getItem('bms_tab'); if (v === 'eng') $('tabs').querySelector('[data-v="eng"]').click(); } catch (e) {}
 
-live(); runs(); link();
+live(); runs(); link(); tests();
+setInterval(tests, 2000);
 setInterval(live, 1000);
 setInterval(fresh, 1000);
 setInterval(runs, 5000);

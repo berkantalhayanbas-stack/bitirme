@@ -69,6 +69,9 @@
  *   p <0..100>       pedal yüzdesi (pot yerine; PEDL moduna geçer; p -1 = pota dön)
  *   t <°C>           paket sıcaklığını hedefe getir (çekirdek = yüzey), örnek başına en çok 0,5 °C:
  *                    ani sıçrama ECU'nun sıcaklık hızı teşhisine (2 °C/örnek) takılıp LIMP verirdi
+ * Her basışta (buton ya da k/l) bir satır: B,<olay>,<1 başladı | 0 kaldırıldı>; olay = EV_* (0 NORMAL
+ *   servis, 1 dolu+şarj, 2 sensör kopuk, 3 hat kopuk, 4 watchdog, 5 soğutma arızası, 6 aşırı ısınma).
+ *   tools/web/gateway.py --emu bunu panele "BUTTON" olayı olarak gönderir ve ECU'nun tepkisini ölçer.
  * Her 1 s bir rapor satırı (tools/twin_emu_run.py bunu özetler):
  *   R,t_s,mode,v_kmh,I,V,soc%,Tc,Ts,Ta,ta_src,ecu_state,Idis,Ichg,cause,soc_ecu%,tc_ecu,ok201,ok202,err,
  *     TEC,REC,bal_mask,bal_flags,dv_ecu_mV,dv_mV,dsoc%,bal_k,ok210,step_us,faults
@@ -354,7 +357,12 @@ void readInputs(uint8_t tick, uint32_t now)
 }
 
 /* LCD'de 3 s bildirim: i = EV_*, on = 1 arıza/senaryo başladı, 0 kaldırıldı */
-void notify(uint8_t i, uint8_t on, uint32_t now) { ev_sc = i;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0; }
+void notify(uint8_t i, uint8_t on, uint32_t now)
+{
+  ev_sc = i;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0;
+  /* gateway satırı (tools/web/gateway.py --emu): B,<EV_*>,<1 başladı | 0 kaldırıldı> */
+  Serial.print(F("B,"));  Serial.print(i);  Serial.print(',');  Serial.println(on);
+}
 
 /* DERATE kısa basış: dolu bataryaya hızlı şarj (aç/kapa) */
 void chargeFull(uint8_t on)
@@ -386,7 +394,10 @@ void serviceStart(uint32_t now)
 
 void svcStep(uint32_t now)
 {
-  if (svc == 1 && t_pack_goal > 90.0f && veh_v == 0.0f && now - svc_t >= 1000) { svc = 2;  svc_t = now - 400; }
+  /* durunca ve paket hedefe gelince; 5 s'de olmazsa yine dene (ECU |I| >= 1 A'da reddeder, raporlanır) */
+  if (svc == 1 && ((t_pack_goal > 90.0f && veh_v == 0.0f && now - svc_t >= 1000) || now - svc_t >= 5000)) {
+    svc = 2;  svc_t = now - 400;
+  }
   if (svc == 2 && now - svc_t >= 400) {               /* 3 kez; ECU ilk 1 s'de gelenleri reddeder */
     sendCommand(CAN_CMD_ECU_RESTART, CAN_CMD_UNLOCK, now);
     svc_t = now;
@@ -500,7 +511,10 @@ void vehicleStep()
     if (F < 0.0f) F = 0.0f;
   }
   veh_v += (F - res) / VEH_M * DT;
-  if (veh_v < 0.0f) veh_v = 0.0f;
+  /* duruş: talep yokken (fren / bekleme) 0,1 m/s altında araç durur. Yoksa fren 0,05 m/s altında
+   * bırakılıyor, araç ~0,2 km/h ile sürünüp kalıyordu (park modunda yardımcı yük 3 A, servis durmayı
+   * hiç göremiyordu). */
+  if (veh_v < 0.0f || (F_dem <= 0.0f && veh_v < 0.1f)) veh_v = 0.0f;
 }
 
 /* ---------------------------------------------------------------- 10 Hz adım */

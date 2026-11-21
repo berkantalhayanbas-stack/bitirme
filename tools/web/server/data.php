@@ -4,6 +4,7 @@
 // GET ?q=run&id=<run_id>   → tek senaryonun tüm verisi + olaylar
 // GET ?q=link&min=5        → son N dakikanın bağlantı kalitesi (p50/p95, kayıp)
 // GET ?q=linkhist&min=5    → son N dakikanın yığın başına RTT / uçtan uca gecikme / kayıp (grafik)
+// GET ?q=tests             → son mod butonu basışları ve ECU tepkileri (BUTTON / REACTION olayları)
 // GET ?q=ping              → sunucu kontrolü (SQLite sürümü, satır sayısı)
 require __DIR__ . '/config.php';
 
@@ -70,6 +71,11 @@ if ($q === 'linkhist') {
                          FROM link WHERE srv_ms >= ? ORDER BY id LIMIT 2000');
     $st->execute([(int)round(microtime(true) * 1000) - $min * 60000]);
     out(['now_ms' => (int)round(microtime(true) * 1000), 'rows' => $st->fetchAll()]);
+}
+
+if ($q === 'tests') {
+    out($pdo->query("SELECT id,t_ms,code,detail,rx_at FROM events WHERE code IN ('BUTTON','REACTION')
+                     ORDER BY id DESC LIMIT 16")->fetchAll());
 }
 
 if ($q === 'ping') {

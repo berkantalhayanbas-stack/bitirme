@@ -15,6 +15,14 @@ STM32 (LPUART1, COM9) --UART--> gateway.py (PC) --HTTPS POST--> server/api.php -
   - Gateway penceresine `RUN <id>`, `ALL [n]` ya da `STOP` yazılır.
   - Her koşu `RS`/`RE` satırı üretir. İzli koşular (her `MC_TRACE_EVERY`. koşu ve `RUN`) 1 Hz `D` satırları gönderir; `run` alanı koşu numarasıdır.
 
+## Mod butonları (panelde "Button tests")
+```
+python tools/web/gateway.py COM9 --emu COM10
+```
+- Gateway twin_emu'nun portunu da okur: her basışta Uno `B,<olay>,<1|0>` yazar → "BUTTON" olayı; gateway ECU'nun D satırlarındaki durumu izleyip beklenen moda geçiş süresini "REACTION" olayı olarak ekler (PC saati, 0,1 s çözünürlük; NORMAL servisinde önce ECU'nun yeniden başlaması beklenir; ECU zaten o moddaysa "already in ..."). ECU senaryoyu bilmez, CAN değişmez.
+- Panel: Overview'da "Button tests" kartı (`data.php?q=tests`).
+- COM10'u açmak Uno'yu sıfırlar (~2 s susar; ECU SAFE'e düşer, NORMAL butonuyla dönülür). Klavyeden `emu <komut>` Uno'ya gider (ör. `emu k 2`). `--emu` açıkken `demo_run.py` ve Arduino IDE (yükleme, Serial Monitor) COM10'u kullanamaz: önce gateway'i kapat.
+
 ## PC: gateway
 ```
 pip install pyserial requests
@@ -27,7 +35,7 @@ python tools/web/gateway.py COM9
 
 ## Bağlantı kalitesi (gecikme, kayıp)
 Ölçüm gateway'de yapılır; ECU yazılımı değişmez (D satırındaki `t_ms` yeterli).
-- **UART kaybı:** aynı run'da ardışık `t_ms` farkı, görülen en küçük periyodun 1,5 katını aşarsa aradaki satırlar eksik sayılır. 1 s'den uzun boşluk kayıp sayılmaz (ECU duraklaması: ECU adımı ölçüm çiftiyle atar; EMU sıfırlanınca ya da hat kopunca satır da gelmez). İlk sürüm bunu da sayıyordu: senaryo denemesinde (COM10 açılışı Uno'yu ~2 s susturur) %1,2 "kayıp" görünmüştü. `D,` ile başlayıp ayrıştırılamayan satır bozuk sayılır.
+- **UART kaybı:** aynı run'da ardışık `t_ms` farkı, periyodun (son 21 aralığın medyanı) 1,5 katını aşarsa aradaki satırlar eksik sayılır. 1 s'den uzun boşluk kayıp sayılmaz (ECU duraklaması: ECU adımı ölçüm çiftiyle atar; EMU sıfırlanınca ya da hat kopunca satır da gelmez). İlk sürüm bunu da sayıyordu: senaryo denemesinde (COM10 açılışı Uno'yu ~2 s susturur) %1,2 "kayıp" görünmüştü. Periyot önce "görülen en küçük aralık"tı: Uno yeniden başlayınca ECU adımının fazı kayıp tek bir 38 ms aralık bırakınca sonraki her 100 ms aralığı 2 kayıp satır sayılıyordu (2026-11-21, kartta). `D,` ile başlayıp ayrıştırılamayan satır bozuk sayılır.
 - **UART titreşimi** (yalnız canlı mod, run 0): PC alış zamanı ile `t_ms` farkının son 5 s'deki en küçüğünden sapması. İlk sürüm oturumun en küçüğünü alıyordu; ECU ile PC saati arasında ~0,5 ms/s kayma olduğu için (2026-11-21, kartta) değer zamanla doğrusal büyüyüp 20 dakikada ~535 ms'ye çıktı, bu titreşim değil saat kaymasıydı.
 - **Upload RTT** ve **uçtan uca gecikme** (satırın UART'tan alınması → sunucu onayı): ikisi de PC saatiyle ölçülür, iki saat eşlemesi gerekmez. Uçtan uca gecikmenin ~1 s'si 1 s'lik yığınlamadan gelir (tasarım gereği).
 - Her yığına `meta` eklenir. `api.php` bunu `link` tablosuna yazar; `seq` en son kabul edilenden büyük değilse yığını **tekrar oynatma** sayıp 409 ile reddeder. `meta`'sız istemci (`arduino/esp_gateway`) yine kabul edilir.
