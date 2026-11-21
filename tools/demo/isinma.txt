@@ -5,10 +5,10 @@ bekle state==1 30
 +1 m 0             ; Araç hazır sürüş çevrimini sürüyor
 +20 m 0
 === A2 Asiri isinma
-+2 k 2             ; A2: paket isinmaya basladi (0,5 C/s)
++2 l 4             ; STOP uzun basis: paket isinmaya basladi (0,5 C/s)
 bekle state==3 90  ; ECU aciklanamayan isinmayi fark etti (termal anomali): LIMP-HOME, izin %25
 bekle state==4 120 ; 60 C: SAFE-STOP, kontaktor acik, far sonuk
-+3 k 2             ; A2: isi kaynagi kalkti, paket soguyor
++3 l 4             ; STOP uzun basis: isi kaynagi kalkti, paket soguyor
 bekle Ts<42 120    ; Paket sogudu (ikiz ortam + 2 °C'ye soğur; LM35 ~38 °C okuyor)
 +0 !reset          ; Servis: ECU yeniden baslatildi
 bekle state==1 30  ; ECU NORMAL

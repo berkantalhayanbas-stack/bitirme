@@ -1,40 +1,45 @@
-# 5 senaryo butonunun kart testi: "k <n>" = n. butona basmak (aynı kod yolu, twin_emu scenario()).
+# Butonların "gizli arıza" ve servis senaryoları: "k <n>" kısa, "l <n>" uzun basış (twin_emu press()):
+# 1 NORMAL, 2 DERATE (uzun: soğutma arızası), 3 LIMP, 4 STOP (uzun: aşırı ısınma), 5 WATCHDOG.
 # python tools/demo_run.py tools/demo/butonlar.txt
 # Sürüş: hazır çevrim (PROF). Her senaryo bir stres uygular, ECU fark edip önlem alır.
 
-=== D3 Sogutma arizasi
-+1 m 0             ; Arac hazir surus cevrimini suruyor
-+0 k 1             ; D3: sogutma arizasi (ECU'ya haber verilmedi)
+=== Hazirlik
++3 a 25            ; Ortam 25 C (oda sicakligindan bagimsiz)
++0 k 1             ; NORMAL butonu: servis (paket 25-35 C, ECU yeniden baslar, surus)
+bekle state==1 60  ; ECU NORMAL
+
+=== DERATE uzun basis: sogutma arizasi
++0 l 2             ; DERATE uzun basis: sogutma arizasi (ECU'ya haber verilmedi)
 bekle cause&2 700  ; ECU arizayi kendi kestiriminden buldu: izin %70 (>= 120 s; 25 C soguk pakette ~490 s)
-+10 k 1            ; D3: sogutma onarildi
++10 l 2            ; DERATE uzun basis: sogutma onarildi
 +0 !reset          ; (ECU yeniden baslatildi: alarm temizlendi)
 bekle state==1 30  ; ECU NORMAL
 
-=== A2 Asiri isinma
-+2 k 2             ; A2: paket isinmaya basladi (0,5 C/s)
+=== STOP uzun basis: asiri isinma
++2 l 4             ; STOP uzun basis: paket isinmaya basladi (0,5 C/s)
 bekle state==3 90  ; ECU aciklanamayan isinmayi fark etti (termal anomali): LIMP-HOME, izin %25
 bekle state==4 120 ; 60 C: SAFE-STOP, kontaktor acik, far sonuk
-+3 k 2             ; A2: isi kaynagi kalkti, paket soguyor
++3 l 4             ; STOP uzun basis: isi kaynagi kalkti, paket soguyor
 bekle Ts<42 120    ; Paket sogudu (ikiz ortam + 2 °C'ye soğur; LM35 ~38 °C okuyor)
 +0 !reset          ; Servis: ECU yeniden baslatildi
 bekle state==1 30  ; ECU NORMAL
 
-=== A3 Sensor koptu
-+2 k 3             ; A3: sicaklik sensoru koptu
+=== LIMP: sensor koptu
++2 k 3             ; LIMP: sicaklik sensoru koptu
 bekle state==3 5   ; ECU olcumun gecersiz oldugunu anladi: LIMP-HOME
-+8 k 3             ; A3: sensor onarildi
++8 k 3             ; LIMP tekrar: sensor onarildi
 +0 !reset
 bekle state==1 30  ; ECU NORMAL
 
-=== D4 Iletisim koptu
-+2 k 4             ; D4: olcum hatti koptu
+=== STOP: iletisim koptu
++2 k 4             ; STOP: olcum hatti koptu
 bekle state==4 3   ; ECU 0,5 s icinde SAFE
-+8 k 4             ; D4: hat onarildi
++8 k 4             ; STOP tekrar: hat onarildi
 +0 !reset
 bekle state==1 30  ; ECU NORMAL
 
-=== D5 Yazilim kilitlendi
-+2 k 5             ; D5: ECU yazilimi kilitlendi (watchdog testi)
+=== WATCHDOG: yazilim kilitlendi
++2 k 5             ; WATCHDOG: ECU yazilimi kilitlendi
 bekle state==4 5   ; Watchdog sifirladi, ECU SAFE'te acildi
 +8 !reset
 bekle state==1 30  ; ECU NORMAL

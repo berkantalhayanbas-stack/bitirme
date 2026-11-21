@@ -1,0 +1,39 @@
+# Mod butonlarının kart testi ve web paneli gösterimi: NORMAL -> DERATE -> LIMP-HOME -> STOP, her
+# birinden NORMAL butonuyla (servis: arızaları kaldır + ECU'yu CAN'den yeniden başlat) dönüş.
+# "k <n>" = n. butona kısa basış (twin_emu press()): 1 NORMAL, 2 DERATE, 3 LIMP, 4 STOP, 5 WATCHDOG.
+# python tools/demo_run.py tools/demo/modlar.txt   (gateway COM9'dan panele yazarken çalışabilir)
+
+=== NORMAL
++3 h 0             ; Sicak gun kapali
++0 a 25            ; Ortam 25 C
++0 k 1             ; NORMAL butonu: servis (paket sogur, park, ECU yeniden baslar, surus)
+bekle state==1 60  ; ECU NORMAL: tam guc
++30 -              ; Normal surus
+
+=== DERATE
++0 k 2             ; DERATE butonu: dolu bataryaya hizli sarj (SOC %88, 0,7C)
+bekle state==2 30  ; Hucre gerilimi ust sinira yaklasti: sarj akimi kisildi (DERATE)
++20 -              ; Kisitli sarj
++0 k 1             ; NORMAL butonu (sarj biter, eski SOC, ECU yeniden baslar)
+bekle state==1 60  ; ECU NORMAL
+
+=== LIMP-HOME
++10 k 3            ; LIMP butonu: sicaklik sensoru koptu
+bekle state==3 5   ; Olcum gecersiz: LIMP-HOME, izin %25
++20 -              ; Kisitli surus (eve donus)
++0 k 1             ; NORMAL butonu (sensor onarilir, ECU yeniden baslar)
+bekle state==1 60  ; ECU NORMAL
+
+=== STOP
++15 k 4            ; STOP butonu: olcum hatti koptu
+bekle state==4 3   ; 0,5 s icinde SAFE-STOP: kontaktor acik
++15 -              ; Guc yok
++0 k 1             ; NORMAL butonu (hat onarilir, ECU yeniden baslar)
+bekle state==1 60  ; ECU NORMAL
+
+=== WATCHDOG
++10 k 5            ; WATCHDOG butonu: ECU yazilimi kilitlendi
+bekle state==4 5   ; Watchdog sifirladi, ECU SAFE'te acildi (kilitli)
++8 k 1             ; NORMAL butonu (servis yeniden baslatmasi SAFE kilidini acar)
+bekle state==1 60  ; ECU NORMAL
++20 -              ; Normal surus

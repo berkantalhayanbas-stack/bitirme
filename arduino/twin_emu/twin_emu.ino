@@ -29,17 +29,25 @@
  *   (I = V / 10 ohm ~ 0,41 A). Gerçek hızda %1 SOC farkı ~1,4 saatte kapanır; gösterim için
  *   "b <k>" direncin SOC etkisini k katına çıkarır (zaman hızlandırma; gerilim düşümü gerçek akımla
  *   kalır). HIZLANDIRILMIŞ olduğu raporda ve LCD'de görünür.
- * Stres senaryoları: her buton bataryaya bir stres uygular, ECU fark edip önlem alır (far = izin).
- * Basış aç/kapa (D5 hariç); LCD 3 s senaryo adını gösterir, sonra sayfalar kendiliğinden döner.
- *   D3  SOGUTMA  soğutma arızası: ikizde R_u x4 (twin cooling_fault). ECU'ya söylenmez; ECU R_u
+ * Mod butonları: her butonun üstünde ECU'nun varacağı mod yazar, altında bir SEBEP çalışır; modu
+ * ECU kendi ölçüm ve teşhisinden seçer (ECU senaryoyu bilmez, CAN çerçeveleri aynı). Kısa basış
+ * (< 1 s, bırakınca) hızlı gösterim; uzun basış (>= 1 s) aynı modun "gizli arıza" senaryosu (tezin
+ * HIL bulguları). Tekrar basış o arızayı kaldırır (ECU'yu yeniden başlatmaz). LCD 3 s "sebep>mod".
+ *   D3  NORMAL   servis: tüm arızaları kaldır, paketi 25-35 °C'ye getir (ortam + 2; ön koşullandırma), DERATE
+ *                şarjından önceki SOC'ye dön, park (I = 0) -> ECU'ya 0x301 cmd 0x01 (CAN_CMD_UNLOCK)
+ *                3 kez 0,4 s arayla (ECU |I| < 1 A ister; açılıştan sonraki 1 s komut reddeder, fazlası
+ *                zararsız) -> 1,5 s sonra sürüş çevrimi. ECU NORMAL'e ~11 s'de (1 s sıfır akım + rampa).
+ *   A2  DERATE   kısa: dolu bataryaya hızlı şarj (SOC %88, 0,7C) -> hücre gerilimi üst sınıra yaklaşır
+ *                -> SOP şarj payı (cause 8) -> DERATE (< 1 s). Tekrar: şarj biter, eski SOC, sürüş.
+ *                uzun: soğutma arızası (R_u x4, twin cooling_fault). ECU'ya söylenmez; ECU R_u
  *                kestiriminden bulur (açılıştan >= 120 s sonra) -> soğutma alarmı, izin %70.
- *   A2  ISINMA   aşırı ısınma (dış ısı kaynağı / termal olay): paket 0,5 °C/s ile 62 °C'ye ısınır
- *                -> 45 °C derating (izin kademeli düşer) -> 55 °C LIMP -> 60 °C SAFE (kilitli).
- *                Tekrar basış: ortama soğuma (aynı hız). SAFE'ten çıkış ECU reseti ister.
- *   A3  SENSOR   sıcaklık sensörü kopuk: 0x101 T = -40 °C -> ECU sensör teşhisi -> LIMP (%25).
- *   D4  CAN      ölçüm hattı kopuk: 0x101/0x102/hücre çerçeveleri gitmez -> ECU 0,5 s'de SAFE.
- *   D5  WDG      ECU'ya 0x301 cmd 0x04 (CAN_CMD_UNLOCK): ECU sonsuz döngüye girer, IWDG sıfırlar,
+ *   A3  LIMP     sıcaklık sensörü kopuk: 0x101 T = -40 °C -> ECU sensör teşhisi -> LIMP (%25).
+ *   D4  STOP     kısa: ölçüm hattı kopuk: 0x101/0x102/hücre çerçeveleri gitmez -> ECU 0,5 s'de SAFE.
+ *                uzun: aşırı ısınma (dış ısı / termal olay): paket 0,5 °C/s ile 62 °C'ye -> termal
+ *                anomali LIMP -> 60 °C SAFE (kilitli). Tekrar uzun basış: ortama soğuma (aynı hız).
+ *   D5  WATCHDOG ECU'ya 0x301 cmd 0x04 (CAN_CMD_UNLOCK): ECU sonsuz döngüye girer, IWDG sıfırlar,
  *                ECU SAFE-STOP'ta açılır (yalnız BMS_SAFETY=1 ECU derlemesinde).
+ *   SAFE ve LIMP kilitlidir: çıkış NORMAL butonuyla (servis yeniden başlatması).
  *   D3 basılı açılış  sıcak gün: ortam = LM35 + 15 °C (LM35 yoksa 40 °C; twin hot_day).
  *   LM35 kopması açılışta LM35 vardıysa ve sonra kaybolursa sıcaklık sensörü kopuk sayılır:
  *                0x101 T = -40 °C (cmd 0x14 ile aynı) -> ECU sensör teşhisi -> LIMP. Takılınca kalkar.
@@ -55,8 +63,9 @@
  *   m <0..3>         sürüş modu       s <yüzde>  ikiz SOC'yi ayarla (ör. s 80; grup farkları korunur)
  *   a <°C>           ortam sıcaklığını zorla (a 99 = kapat, LM35 / 25 °C'ye dön)
  *   b <k>            dengeleme akımı çarpanı (1 = gerçek 0,41 A; 1..2000)
- *   f <0|1>          soğutma arızası (D3)   i <0|1>  aşırı ısınma (A2)   h <0|1>  sıcak gün (+15 °C)
- *   k <1-5>          senaryo butonuna basmak (1 D3 ... 5 D5; tools/demo_run.py ve testler için)
+ *   f <0|1>          soğutma arızası        i <0|1>  aşırı ısınma         h <0|1>  sıcak gün (+15 °C)
+ *   k <1-5>          butona kısa basış (1 NORMAL, 2 DERATE, 3 LIMP, 4 STOP, 5 WATCHDOG; demo_run.py)
+ *   l <1-5>          butona uzun basış (2 soğutma arızası, 4 aşırı ısınma; diğerleri = kısa)
  *   p <0..100>       pedal yüzdesi (pot yerine; PEDL moduna geçer; p -1 = pota dön)
  *   t <°C>           paket sıcaklığını hedefe getir (çekirdek = yüzey), örnek başına en çok 0,5 °C:
  *                    ani sıçrama ECU'nun sıcaklık hızı teşhisine (2 °C/örnek) takılıp LIMP verirdi
@@ -78,10 +87,20 @@ extern "C" {
 
 const uint8_t  PIN_CS = 10, PIN_INT = 2;
 const uint8_t  PIN_PEDAL = A0, PIN_LM35 = A1;
-/* senaryo butonları: SC_COOL D3, SC_HEAT A2, SC_SENS A3, SC_CAN D4, SC_WDG D5 */
-enum { SC_COOL, SC_HEAT, SC_SENS, SC_CAN, SC_WDG, N_SC };
+/* mod butonları (dosya başı): D3 NORMAL, A2 DERATE, A3 LIMP, D4 STOP, D5 WATCHDOG */
+enum { B_NORM, B_DER, B_LIMP, B_STOP, B_WDG, N_SC };
 const uint8_t  PIN_SC[N_SC] = { 3, A2, A3, 4, 5 };
-const char     SC_NAME[N_SC][9] = { "SOGUTMA", "ISINMA", "SENSOR", "CAN", "WATCHDOG" };
+const uint8_t  LONG_TICKS = 10;            /* 100 ms örnek: >= 1 s basılı = uzun basış */
+/* LCD bildirimi (16 karakter, "sebep>mod"); ev_sc bu tablonun indisidir */
+enum { EV_NORM, EV_CHG, EV_LIMP, EV_STOP, EV_WDG, EV_COOL, EV_HEAT, N_EV };
+const char EV_TXT[N_EV][2][17] PROGMEM = {
+  { "SERVIS>NORMAL   ", "SERVIS>NORMAL   " },
+  { "DOLU+SARJ>DERATE", "SARJ BITTI      " },
+  { "SENSOR KOP>LIMP ", "SENSOR ONARILDI " },
+  { "HAT KOPTU>STOP  ", "HAT ONARILDI    " },
+  { "WATCHDOG>SAFE   ", "WATCHDOG>SAFE   " },
+  { "SOGUTMA>DERATE  ", "SOGUTMA ONARILDI" },
+  { "ISINMA>LIMP>STOP", "ISINMA: SOGUYOR " } };
 const float    T_HEAT_MAX = 62.0f, HEAT_RATE = 0.05f;   /* °C, °C/örnek (0,5 °C/s; ECU hız teşhisi 2) */
 const float    RU_FAULT = 4.0f;            /* twin cooling_fault: R_u x4 */
 const float    T_HOT    = 15.0f;           /* sıcak gün ortam ofseti [°C] (25 + 15 = twin hot_day 40 °C) */
@@ -154,8 +173,14 @@ uint8_t  lm35_ok = 0, lm35_init = 0;
 uint8_t  lm35_seen = 0, lm35_lost = 0;     /* açılışta vardı / sonradan koptu (-> NTC kopuk) */
 uint8_t  hot_day = 0, cool_fault = 0;
 uint8_t  heat_on = 0;                      /* A2: aşırı ısınma (0 yok, 1 ısın, 2 ortama soğu) */
-uint8_t  page = 0, btn_prev = 0;
-int8_t   ev_sc = -1;                       /* LCD'de gösterilen son senaryo (-1 yok) */
+uint8_t  page = 0;
+uint8_t  btn_n[N_SC];                      /* basılı kalma süresi (100 ms adım, 255 = yok say) */
+uint8_t  chg_on = 0;                       /* DERATE kısa basış: dolu bataryaya şarj sürüyor */
+float    soc_before = -1.0f;               /* şarj senaryosundan önceki SOC (NORMAL geri yükler) */
+uint8_t  svc = 0;                          /* NORMAL servis adımı: 0 yok, 1 soğut/bekle, 2 komut, 3 sürüşe dön */
+uint32_t svc_t = 0;
+uint8_t  svc_n = 0;
+int8_t   ev_sc = -1;                       /* LCD'de gösterilen son bildirim (EV_*, -1 yok) */
 uint8_t  ev_on = 0;
 uint32_t ev_until = 0, t_page = 0;
 
@@ -274,7 +299,7 @@ void sendCommand(uint8_t cmd, int16_t value, uint32_t now)
 }
 
 /* ---------------------------------------------------------------- sensörler ve butonlar */
-void scenario(uint8_t k, uint32_t now);
+void press(uint8_t k, uint8_t lng, uint32_t now);
 
 void setCoolFault(uint8_t on)
 {
@@ -316,33 +341,88 @@ void readInputs(uint8_t tick, uint32_t now)
     pedal = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
   }
 
-  /* butonlar 100 ms'de bir örneklenir (sıçrama süzgeci yerine geçer); basılma kenarı */
-  uint8_t b = 0;
-  for (uint8_t k = 0; k < N_SC; k++) b |= (digitalRead(PIN_SC[k]) == LOW) << k;
-  const uint8_t edge = b & ~btn_prev;
-  btn_prev = b;
-  for (uint8_t k = 0; k < N_SC; k++) if (edge >> k & 1) scenario(k, now);
+  /* butonlar 100 ms'de bir örneklenir (sıçrama süzgeci yerine geçer). Kısa basış bırakınca,
+   * uzun basış 1 s dolunca (basılıyken) tetiklenir; bırakış ondan sonra yok sayılır. */
+  for (uint8_t k = 0; k < N_SC; k++) {
+    if (digitalRead(PIN_SC[k]) == LOW) {
+      if (btn_n[k] < 255 && ++btn_n[k] == LONG_TICKS) { press(k, 1, now); btn_n[k] = 255; }
+    } else {
+      if (btn_n[k] && btn_n[k] < LONG_TICKS) press(k, 0, now);
+      btn_n[k] = 0;
+    }
+  }
 }
 
-/* senaryo butonu k (seri "k <1-5>" de buraya gelir): aç/kapa, LCD'de 3 s adı */
-void scenario(uint8_t k, uint32_t now)
+/* LCD'de 3 s bildirim: i = EV_*, on = 1 arıza/senaryo başladı, 0 kaldırıldı */
+void notify(uint8_t i, uint8_t on, uint32_t now) { ev_sc = i;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0; }
+
+/* DERATE kısa basış: dolu bataryaya hızlı şarj (aç/kapa) */
+void chargeFull(uint8_t on)
 {
-  uint8_t on = 1;
+  chg_on = on;
+  if (on) { if (soc_before < 0.0f) soc_before = tw.soc_avg;  twin_set_soc(&tw, 0.88f);  mode = M_CHG; }
+  else    { if (soc_before >= 0.0f) twin_set_soc(&tw, soc_before);  soc_before = -1.0f;  mode = M_PROF; }
+  Serial.println(on ? F("full-battery charge ON (SOC 88 %)") : F("full-battery charge OFF"));
+}
+
+/* NORMAL: servis. Arızaları kaldır, paketi soğut, park; adımlar svcStep()'te */
+void serviceStart(uint32_t now)
+{
+  memset(f_on, 0, sizeof(f_on));
+  if (cool_fault) setCoolFault(0);
+  heat_on = 0;
+  if (chg_on) chargeFull(0);
+  /* ön koşullandırma: paket 25-35 °C'ye (ortam + 2). 23 °C altı veri sayfası şarj sınırı (DERATE),
+   * 43 °C üstü sıcaklık sınırları. 0,5 °C/örnek rampa (servis kısayolu); ısıtma termal anomaliyi
+   * tetikleyebilir ama ECU rampa bitince yeniden başlatılır. Soğuk ortamda paket zamanla (tau ~10 dk)
+   * yine soğur: o zaman DERATE gerçektir. */
+  float goal = t_amb + 2.0f;
+  goal = goal < 25.0f ? 25.0f : (goal > 35.0f ? 35.0f : goal);
+  if (fabsf(tw.ts - goal) > 0.5f) t_pack_goal = goal;
+  mode = M_IDLE;                                      /* ECU yeniden başlatmayı |I| < 1 A'da kabul eder */
+  svc = 1;  svc_t = now;  svc_n = 0;
+  Serial.println(F("service: faults cleared, parking"));
+}
+
+void svcStep(uint32_t now)
+{
+  if (svc == 1 && t_pack_goal > 90.0f && veh_v == 0.0f && now - svc_t >= 1000) { svc = 2;  svc_t = now - 400; }
+  if (svc == 2 && now - svc_t >= 400) {               /* 3 kez; ECU ilk 1 s'de gelenleri reddeder */
+    sendCommand(CAN_CMD_ECU_RESTART, CAN_CMD_UNLOCK, now);
+    svc_t = now;
+    if (++svc_n >= 3) svc = 3;
+  }
+  if (svc == 3 && now - svc_t >= 1500) { svc = 0;  mode = M_PROF;  Serial.println(F("service: done, driving")); }
+}
+
+/* buton k (seri "k <1-5>" kısa, "l <1-5>" uzun da buraya gelir); dosya başındaki tablo */
+void press(uint8_t k, uint8_t lng, uint32_t now)
+{
+  if (k == B_DER && lng) {                            /* soğutma arızası (gizli; ECU kendisi bulur) */
+    setCoolFault(!cool_fault);
+    if (cool_fault && mode != M_PEDAL) mode = M_PROF; /* ısı akışı gerekir: sürüş */
+    notify(EV_COOL, cool_fault, now);  return;
+  }
+  if (k == B_STOP && lng) {                           /* aşırı ısınma -> anomali LIMP -> 60 °C SAFE */
+    heat_on = heat_on == 1 ? 2 : 1;  t_pack_goal = 99.0f;
+    Serial.println(heat_on == 1 ? F("overheat ON") : F("overheat OFF (cooling down)"));
+    notify(EV_HEAT, heat_on == 1, now);  return;
+  }
   switch (k) {
-    case SC_COOL: setCoolFault(!cool_fault);  on = cool_fault;  break;
-    case SC_HEAT: heat_on = heat_on == 1 ? 2 : 1;  on = heat_on == 1;  t_pack_goal = 99.0f;
-                  Serial.println(on ? F("overheat ON") : F("overheat OFF (cooling down)"));  break;
-    case SC_SENS:
-    case SC_CAN: {                 /* yalnız kendi hatasını aç/kapa (EMU_CLEAR hepsini silerdi) */
-      const uint8_t f = k == SC_SENS ? F_NTC : F_SILENT;
-      on = !f_on[f];
-      if (on) applyEmuCommand(k == SC_SENS ? CAN_CMD_EMU_NTC_OPEN : CAN_CMD_EMU_SILENT, 0, now);
+    case B_NORM: serviceStart(now);  notify(EV_NORM, 1, now);  break;
+    case B_DER:  chargeFull(!chg_on);  notify(EV_CHG, chg_on, now);  break;
+    case B_LIMP:
+    case B_STOP: {                 /* yalnız kendi hatasını aç/kapa (EMU_CLEAR hepsini silerdi) */
+      const uint8_t f = k == B_LIMP ? F_NTC : F_SILENT;
+      const uint8_t on = !f_on[f];
+      if (on) applyEmuCommand(k == B_LIMP ? CAN_CMD_EMU_NTC_OPEN : CAN_CMD_EMU_SILENT, 0, now);
       else { f_on[f] = 0;  Serial.print(F("EMU: fault off "));  Serial.println(FAULT_NAME[f]); }
+      notify(k == B_LIMP ? EV_LIMP : EV_STOP, on, now);
       break;
     }
-    default:      sendCommand(CAN_CMD_ECU_HANG, CAN_CMD_UNLOCK, now);   /* 1 TX tamponu; 0x101/0x102 ile 3 */
+    default:     sendCommand(CAN_CMD_ECU_HANG, CAN_CMD_UNLOCK, now);   /* 1 TX tamponu; 0x101/0x102 ile 3 */
+                 notify(EV_WDG, 1, now);
   }
-  ev_sc = k;  ev_on = on;  ev_until = now + 3000;  t_lcd = 0;
 }
 
 /* ---------------------------------------------------------------- sürüş çevrimi: v_ref, a_ref */
@@ -429,6 +509,7 @@ void step(uint32_t now)
   static uint8_t tick = 0, first = 1;
   const uint32_t t0 = micros();
   readInputs(tick, now);
+  svcStep(now);
   if (++tick >= 10) tick = 0;
   vehicleStep();
   tw.t_amb = t_amb;
@@ -471,7 +552,7 @@ void serialCommands(uint32_t now)
     while (*p == ' ') p++;
     const char k = *p++ | 0x20;
     const long a = strtol(p, &e, 0);
-    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC> | b <k> | f/i/h <0|1> | k <1-5> | p | t")); continue; }
+    if (e == p) { Serial.println(F("usage: c <cmd> <val> | m <0-3> | s <soc%> | a <degC> | b <k> | f/i/h <0|1> | k/l <1-5> | p | t")); continue; }
     if (k == 'c') {
       p = e;
       const long val = strtol(p, &e, 0);
@@ -482,8 +563,8 @@ void serialCommands(uint32_t now)
     else if (k == 'a') { t_force = a; Serial.println(F("T_amb override")); }
     else if (k == 'b' && a >= 1 && a <= 2000) { bal_k = a; Serial.println(F("bleed factor set")); }
     else if (k == 'f') setCoolFault(a != 0);
-    else if (k == 'i') { if ((heat_on == 1) != (a != 0)) scenario(SC_HEAT, now); }
-    else if (k == 'k' && a >= 1 && a <= N_SC) scenario(a - 1, now);
+    else if (k == 'i') { if ((heat_on == 1) != (a != 0)) press(B_STOP, 1, now); }
+    else if ((k == 'k' || k == 'l') && a >= 1 && a <= N_SC) press(a - 1, k == 'l', now);
     else if (k == 'p' && a >= -1 && a <= 100) {
       pedal_force = a;
       if (a >= 0) { mode = M_PEDAL; pedal_armed = 1; }
@@ -542,8 +623,7 @@ void lcdUpdate(uint8_t row)
   const uint8_t st = mon_ctrl.fault ? 5 : (have_ctrl ? (last_ctrl.state <= 4 ? last_ctrl.state : 0) : 0);
   lcd->setCursor(0, row);
   if ((int32_t)(millis() - ev_until) < 0 && ev_sc >= 0) {   /* senaryo bildirimi (3 s) */
-    if (!row) { lcd->print(SC_NAME[ev_sc]); lcd->print(' ');
-                lcd->print(ev_sc == SC_WDG ? F("TETIK   ") : (ev_on ? F("ACIK    ") : F("KAPALI  "))); }
+    if (!row) lcd->print((const __FlashStringHelper *)EV_TXT[ev_sc][ev_on ? 0 : 1]);
     else      { lcd->print(F("ECU ")); lcd->print(STATE_NAME[st]); lcd->print(F(" Id")); lcdNum(last_ctrl.I_allow_dis, 4, 0);
                 lcd->print(F("A  ")); }
   } else if (page == 0) {        /* PROF NORM  42kmh / I+ 23.4 SOC 78.2 */
@@ -579,8 +659,8 @@ void setup()
   for (uint8_t k = 0; k < N_SC; k++) pinMode(PIN_SC[k], INPUT_PULLUP);
   delay(2);
   /* D3 basılıyken açılış = sıcak gün; bırakılırken soğutma arızası tetiklenmesin (kenar yok) */
-  hot_day = digitalRead(PIN_SC[SC_COOL]) == LOW;
-  if (hot_day) btn_prev = 1 << SC_COOL;
+  hot_day = digitalRead(PIN_SC[B_NORM]) == LOW;
+  if (hot_day) btn_n[B_NORM] = 255;                   /* bırakış ve basılı tutma tetiklemesin */
 
   /* pedal var mı: pull-up açıkken kopuk pin 1023 okur; pot herhangi bir konumda daha düşük.
    * Varsayılan sürüş hazır çevrim (PROF); pot yalnız "m 1" ile kullanılır. */
