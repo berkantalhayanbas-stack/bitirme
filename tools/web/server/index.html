@@ -139,6 +139,16 @@
   .crit .tr u { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--axis); }
   .crit b { font-weight:600; color:var(--fg); text-align:right; font-variant-numeric:tabular-nums; }
   .crit.dom span { color:var(--fg); font-weight:600; }
+  /* ---- izleme bütünlüğü: girişi geçersiz kriter 0 değil "bilinmiyor" (taralı, soluk) */
+  .hatch { background:repeating-linear-gradient(135deg, var(--grid) 0 5px, var(--card) 5px 9px) !important; }
+  .crit.unk span:first-child, .crit.unk b { color:var(--mut); }
+  .crit .why { grid-column:2/-1; font-size:11.5px; color:var(--mut); margin-top:-4px; }
+  .crit .why:empty { display:none; }
+  .sees { display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:12px; padding-top:10px; border-top:1px solid var(--grid);
+          font-size:13px; color:var(--fg2); }
+  .sees > b { font-weight:600; color:var(--fg2); flex-basis:100%; font-size:12px; }
+  .sees .miss { color:var(--fg); font-weight:600; }
+  .sees small { color:var(--mut); font-weight:400; }
 </style>
 </head>
 <body>
@@ -189,13 +199,14 @@
     <div class="stress">
       <div>
         <h3>Battery stress</h3>
-        <div class="big"><span id="o_psi">—</span><small>%</small></div>
+        <div class="big"><span id="o_psi">—</span><small id="o_psi_u">%</small></div>
       </div>
       <div>
         <div class="psibar" aria-hidden="true"><div id="o_psibar"></div></div>
         <p class="cap" id="o_psi_cap">&nbsp;</p>
       </div>
     </div>
+    <div class="sees" id="o_sees"></div>
   </section>
   <section class="tile">
     <h3>Power used and available <span class="muted">· last minute</span></h3>
@@ -257,6 +268,7 @@
     <div class="grid" style="padding:0">
       <div>
         <div id="crits"></div>
+        <div class="sees" id="e_sees"></div>
         <p class="note" id="psi_note">Needs the ECU built with BMS_TELEMETRY=2 (stress fields).</p>
       </div>
       <div><div class="plot" style="height:200px"><canvas id="c_psi"></canvas></div></div>
@@ -325,6 +337,57 @@ const num = v => v == null ? null : +v;
 const f = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
 const causeText = c => c == null ? null : CAUSES.filter(([b]) => c & b).map(([, t]) => t);
 const utc = s => Date.parse(String(s).replace(' ', 'T') + 'Z');      // sunucu zamanı UTC
+
+// ---------------------------------------------------------------- izleme bütünlüğü (Ω)
+// Sensör kopukluğu, ölçüm hattı kaybı, watchdog bataryayı zorlamaz; ECU'nun görmesini engeller. Girişi geçersiz
+// kriter 0 ("stres yok") değil "bilinmiyor" gösterilir (docs/stress_criteria_review.md 3.4). Yalnız panel
+// çıkarımı, ECU telemetrisi değişmez:
+//  sıcaklık: t_meas DIAG_T_MIN/MAX (-30 / 85 °C) dışında (twin_emu kopuk NTC'yi -40 gönderir)
+//  akım: neden 32 (sensör) varken sıcaklık makul -> akım sensörü ya da ofset (ECU ikisini tek bitte topluyor)
+//  hat: I, V, T >= 1 s (10 satır) birebir aynı: ECU çerçeve gelmeyince tutulan değerle adım atar, ikizde
+//       gürültü var; geniş telemetri yoksa son BOOT'tan sonra CAN_TIMEOUT + SAFE
+//  ECU: son BOOT nedeni WDG-RESET / FLASH-CRC -> kalıcı SAFE (ECU bunu da CAN_TIMEOUT diye yazar, hat sanılmasın)
+//  açılış: ilk 120 s Ψ_C (DEC_N_COOL_BLANK) ve Ψ_H (k_R yakınsaması) henüz değerlendirilmiyor
+const SIGS = [['temp', 'Temperature sensor'], ['cur', 'Current sensor'], ['link', 'Measurement link'], ['ecu', 'Controller']];
+const NEEDS = { psi_t: ['temp', 'cur', 'link'], psi_c: ['temp', 'cur', 'link'], psi_tdot: ['temp', 'link'], psi_h: ['cur', 'link'] };
+const SETTLE_MS = 120000, N_FROZEN = 10;
+let boot = null, canLost = false;          // son BOOT olayı (run 0) ve ondan sonra CAN_TIMEOUT geldi mi (alerts() günceller)
+function sight(r) {
+  const bad = {}, crit = {};
+  const wide = r.v_pack != null;
+  const bootOk = boot && boot.t_ms <= r.t_ms;                         // bu ECU oturumunun BOOT'u
+  const latched = bootOk && /WDG|CRC/.test(boot.detail ?? '');
+  if (latched) bad.ecu = /WDG/.test(boot.detail) ? 'restarted by its watchdog: safe stop is latched until a service restart'
+                                                 : 'flash self-check failed: safe stop is latched';
+  if (wide ? (r.$fz ?? 0) >= N_FROZEN : (r.state === 4 && canLost && !latched))
+    bad.link = 'no new measurements from the battery (values frozen)';
+  const tBad = r.t_meas != null && (r.t_meas < -30 || r.t_meas > 85);
+  if (!bad.link && tBad) bad.temp = `reads ${f(r.t_meas, 0)} °C: open or shorted`;
+  if (!bad.link && ((r.cause ?? 0) & 32) && !tBad)
+    bad.cur = r.t_meas == null ? 'a sensor reading is implausible (temperature or current)' : 'reading or offset implausible';
+  for (const k of Object.keys(NEEDS)) {
+    const lost = NEEDS[k].filter(s => bad[s]);
+    if (lost.length) {
+      // Ψ_T: sıcaklık yokken gözlemci modelle sürer (bms_algo.c "bozulmuş mod"): değer var ama ölçüme dayanmıyor
+      crit[k] = k === 'psi_t' && lost.length === 1 && lost[0] === 'temp'
+        ? { k: 'est', why: 'model estimate only: no temperature reading' }
+        : { k: 'unk', why: `unknown: ${lost.map(s => SIGS.find(x => x[0] === s)[1].toLowerCase()).join(', ')} lost` };
+    } else if ((k === 'psi_c' || k === 'psi_h') && r.t_ms < SETTLE_MS) {
+      crit[k] = { k: 'wait', why: `starting up: assessed after ${SETTLE_MS / 1000} s` };
+    }
+  }
+  return { bad, crit, unk: Object.values(crit).some(c => c.k === 'unk'), any: Object.keys(bad).length > 0 };
+}
+// "BMS neyi görebiliyor" satırı (Overview ve Engineering ortak)
+function seesHtml(s, r) {
+  const items = SIGS.map(([k, name]) => {
+    if (s.bad[k]) return `<span class="miss">${name} <small>${esc(s.bad[k])}</small></span>`;
+    if (k === 'ecu' && r.t_ms < SETTLE_MS) return `<span class="wait">${name} <small>started ${f(r.t_ms / 1000, 0)} s ago</small></span>`;
+    if (k === 'cur' && r.t_meas == null && (r.cause ?? 0) & 32) return '';
+    return `<span class="ok">${name}</span>`;
+  });
+  return '<b>What the BMS can see</b>' + items.join('');
+}
 
 // ---------------------------------------------------------------- Chart.js eklentileri
 // eşik çizgileri (kesikli, soluk) + etiket
@@ -424,27 +487,38 @@ const ch = {
           { max: 62, ref: [{ v: 45, t: 'derate 45 °C' }, { v: 55, t: 'LIMP 55 °C' }, { v: 60, t: 'SAFE 60 °C' }] }),
   v: mk('c_v', [['Max group', 'v_max', C.s1], ['Min group', 'v_min', C.s2]], { dec: 3 }),
   soc: mk('c_soc', [['SOC', 'soc', C.s1]], { dec: 2 }),
-  psi: mk('c_psi', [['Ψ', 'psi_s', C.fg], ['Ψ_T', 'psi_t', C.s1], ['Ψ_C', 'psi_c', C.s2], ['Ψ_Tdot', 'psi_tdot', C.s3],
-                    ['Ψ_H', 'psi_h', C.s4]], { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3]] }),
+  // bilinmeyen kriter grafikte boşluk (0 çizilmez); Ψ yalnız tüm girişler geçerliyken
+  psi: mk('c_psi', [['Ψ', r => r.$s?.unk ? null : r.psi_s, C.fg], ['Ψ_T', r => known(r, 'psi_t'), C.s1],
+                    ['Ψ_C', r => known(r, 'psi_c'), C.s2], ['Ψ_Tdot', r => known(r, 'psi_tdot'), C.s3],
+                    ['Ψ_H', r => known(r, 'psi_h'), C.s4]], { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3]] }),
 };
+function known(r, k) { return r.$s?.crit[k]?.k === 'unk' ? null : r[k]; }
 const CRIT_COL = [C.s1, C.s2, C.s3, C.s4];
 $('crits').innerHTML = CRIT.map(([k, name, cap], i) =>
   `<div class="crit" id="cr_${k}"><span>${name}</span><span class="tr"><i id="cb_${k}" style="background:${CRIT_COL[i]}"></i>` +
-  `<u style="left:calc(${100 * cap}% - 1px)" title="cap ${cap}"></u></span><b id="cv_${k}">—</b></div>`).join('') +
-  `<div class="crit dom"><span>Ψ (aggregate)</span><span class="tr"><i id="cb_psi_s" style="background:${C.fg}"></i></span><b id="cv_psi_s">—</b></div>`;
-// stres çubukları (Engineering): değer 0-1, baskın kriter kalın
+  `<u style="left:calc(${100 * cap}% - 1px)" title="cap ${cap}"></u></span><b id="cv_${k}">—</b><small class="why" id="cw_${k}"></small></div>`).join('') +
+  `<div class="crit dom" id="cr_psi_s"><span>Ψ (aggregate)</span><span class="tr" id="ct_psi_s"><i id="cb_psi_s" style="background:${C.fg}"></i></span><b id="cv_psi_s">—</b><small class="why" id="cw_psi_s"></small></div>`;
+// stres çubukları (Engineering): değer 0-1, baskın kriter kalın; girişi geçersiz kriter taralı "?"
 function crits(x) {
-  const has = x.psi_s != null;
+  const has = x.psi_s != null, s = x.$s;
   $('psi_note').textContent = !has ? 'Needs the ECU built with BMS_TELEMETRY=2 (stress fields).'
+    : s.unk ? 'Some criteria cannot be assessed because their inputs are lost (hatched). Ψ is then a lower bound; the BMS limits power by its limp-home / safe-stop rules instead.'
     : x.psi_dom ? `Dominant criterion: ${CRIT[x.psi_dom - 1][1]}. Thin marks show each criterion's cap; only core temperature can reach 1.`
                 : 'No stress: all criteria are zero. Thin marks show each criterion\'s cap.';
   for (const [i, [k]] of CRIT.entries()) {
-    $('cb_' + k).style.width = `${100 * Math.min(1, x[k] ?? 0)}%`;
-    $('cv_' + k).textContent = f(x[k], 2);
-    $('cr_' + k).classList.toggle('dom', x.psi_dom === i + 1);
+    const c = s.crit[k], unk = c?.k === 'unk' || c?.k === 'wait';
+    $('cb_' + k).style.width = unk ? '0%' : `${100 * Math.min(1, x[k] ?? 0)}%`;
+    $('cb_' + k).parentElement.classList.toggle('hatch', !!c);
+    $('cv_' + k).textContent = c?.k === 'unk' ? '?' : c?.k === 'wait' ? '…' : (c?.k === 'est' ? '≈ ' : '') + f(x[k], 2);
+    $('cw_' + k).textContent = c?.why ?? '';
+    $('cr_' + k).classList.toggle('unk', unk);
+    $('cr_' + k).classList.toggle('dom', !unk && x.psi_dom === i + 1);
   }
   $('cb_psi_s').style.width = `${100 * Math.min(1, x.psi_s ?? 0)}%`;
-  $('cv_psi_s').textContent = f(x.psi_s, 2);
+  $('ct_psi_s').classList.toggle('hatch', s.unk);
+  $('cv_psi_s').textContent = !has ? '—' : s.bad.link ? '?' : (s.unk ? '≥ ' : '') + f(x.psi_s, 2);
+  $('cw_psi_s').textContent = s.unk ? 'lower bound: criteria with lost inputs may read too low' : '';
+  $('e_sees').innerHTML = seesHtml(s, x);
 }
 
 let draw = function () {
@@ -464,7 +538,7 @@ function kpis(x) {
   $('k_p').textContent = has && x.i_meas != null ? f(x.v_pack * x.i_meas / 1000, 1) : '—';
   $('k_ia').textContent = `${f(x.i_allow)} / ${f(x.i_chg)}`;
   $('k_psi').textContent = x.psi == null ? '—' : f(100 * x.psi, 0);
-  $('k_psis').textContent = x.psi_s == null ? '—' : f(100 * x.psi_s, 0);
+  $('k_psis').textContent = x.psi_s == null ? '—' : x.$s.bad.link ? '?' : (x.$s.unk ? '≥ ' : '') + f(100 * x.psi_s, 0);
   $('k_td').textContent = x.tdot == null ? '—' : `${f(x.tdot, 1)} / ${f(x.k_r, 2)}`;
   crits(x);
   $('k_tc').textContent = `${f(x.temp)} / ${f(x.ts)}`;
@@ -482,17 +556,20 @@ function kpis(x) {
 async function live() {
   try {
     const j = await (await fetch(lastId ? `data.php?q=live&since=${lastId}` : `data.php?q=live&n=${MAXBUF}`)).json();
+    alerts(j.events);                        // önce: BOOT / CAN_TIMEOUT izleme bütünlüğüne girer
     for (const x of j.rows) {
       for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
                        'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h',
                        'psi_s', 'psi_dom', 'tdot', 'k_r']) x[k] = num(x[k]);
       const p = buf[buf.length - 1];
       if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
+      const q = buf[buf.length - 1];         // donmuş ölçüm sayacı: ECU tutulan değerle adım atıyor mu
+      x.$fz = x.v_pack != null && q && q.i_meas === x.i_meas && q.v_pack === x.v_pack && q.t_meas === x.t_meas ? (q.$fz ?? 0) + 1 : 0;
+      x.$s = sight(x);
       buf.push(x); lastId = Math.max(lastId, +x.id);
     }
     if (buf.length > MAXBUF) buf = buf.slice(-MAXBUF);
-    if (j.rows.length) { const x = buf[buf.length - 1]; lastRx = utc(x.rx_at); kpis(x); overview(x); draw(); }
-    alerts(j.events);
+    if (j.rows.length) { const x = buf[buf.length - 1]; x.$s = sight(x); lastRx = utc(x.rx_at); kpis(x); overview(x); draw(); }
     $('events').innerHTML = j.events.map(e => {
       const st = STATES.indexOf(String(e.code).replace('_', '-')), col = st > 0 ? ST_COL[st] : C.axis;
       const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false });
@@ -507,7 +584,12 @@ function fresh() {
   $('fresh').innerHTML = '<i class="live"></i>' + (s < 5 ? 'Live' : `No new data for ${s < 120 ? s.toFixed(0) + ' s' : (s / 60).toFixed(0) + ' min'}`);
   $('fresh').className = s < 5 ? 'on' : 'stale';
   if (s >= 5) { $('banner').className = 'banner'; $('b_ico').textContent = '?'; $('b_title').textContent = 'No live data';
-                $('b_text').textContent = 'The values below are the last ones received.'; }
+                $('b_text').textContent = 'The values below are the last ones received.';
+                // ECU susuyor (watchdog'suz sonsuz döngü, kablo, gateway): stres hiç bilinmiyor
+                $('o_psi').textContent = '?'; $('o_psi_u').hidden = true; $('o_psibar').style.width = '0%'; $('o_psibar').parentElement.classList.add('hatch');
+                $('o_psi_cap').textContent = 'Unknown: no data from the battery controller.';
+                $('o_sees').innerHTML = '<b>What the BMS can see</b><span class="miss">Controller <small>silent: stopped, ' +
+                                        'disconnected or the gateway is down</small></span>'; }
 }
 
 // şerit üstünde fareyle durum + neden
@@ -634,8 +716,14 @@ $('o_tticks').innerHTML = [0, 45, 55, 60].map(t => `<span style="left:${100 * t 
 function overview(x) {
   // durum: sade dille başlık + neden
   const st = x.state ?? 0;
+  const s = x.$s;
   let why = REASON.filter(([b]) => (x.cause ?? 0) & b).map(([, t]) => t);
-  if (st === 4 && lastEv.slice(0, 4).some(e => e.code === 'CAN_TIMEOUT')) why = ['measurements from the battery stopped arriving'];
+  // SAFE'te ECU nedeni yalnız 128 yazar: izleme bütünlüğünden asıl nedeni söyle (watchdog önce: ECU onu da CAN_TIMEOUT yazar)
+  if (st === 4 && s.bad.ecu) why = [/watchdog/.test(s.bad.ecu) ? 'the battery controller was restarted by its watchdog'
+                                                                : 'the battery controller failed its flash self-check'];
+  else if (st === 4 && s.bad.link) why = ['measurements from the battery stopped arriving'];
+  if (s.bad.temp) why = why.map(t => t === 'a sensor has failed' ? 'the temperature sensor is not reading' : t);
+  else if (s.bad.cur) why = why.map(t => t === 'a sensor has failed' ? 'the current reading is implausible' : t);
   $('banner').className = `banner s${st}`; $('b_ico').textContent = ICON[st] ?? '?';
   $('b_title').textContent = TITLE[st] ?? '?';
   const tail = why.length ? `Because ${why.join(' and ')}.` : '';
@@ -668,7 +756,8 @@ function overview(x) {
   const t = x.temp;
   $('o_t').textContent = f(t, 0);
   $('o_tmk').style.left = `calc(${pct(t ?? 0, T_SCALE)} - 2px)`;
-  const zone = t == null ? '' : t < 45 ? 'Normal range' : t < 55 ? 'Warm: power is reduced' : t < 60 ? 'Hot: limp-home' : 'Too hot: disconnect';
+  const zone = t == null ? '' : s.bad.link ? 'Last value before measurements stopped'
+             : s.bad.temp ? 'Estimated from a model' : t < 45 ? 'Normal range' : t < 55 ? 'Warm: power is reduced' : t < 60 ? 'Hot: limp-home' : 'Too hot: disconnect';
   $('o_t_cap').textContent = zone + (x.t_meas == null ? '' : x.t_meas <= -39.5 ? ' · surface sensor not reading'
                                                                               : ` · surface sensor ${f(x.t_meas)} °C`);
   // hücre dengesi
@@ -678,24 +767,39 @@ function overview(x) {
   } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
   $('o_soh_cap').textContent = `Battery health ${f(x.soh, 0)} %`;
   // stres indeksi Ψ: sade dille baskın kriter; durum renkleri yalnız durum için, çubuk nötr
-  const ps = x.psi_s;
-  $('o_psi').textContent = ps == null ? '—' : f(100 * ps, 0);
-  $('o_psibar').style.width = pct(ps ?? 0, 1);
+  // girişi kaybolan kriter varsa "stres yok" denmez: değer alt sınır, hat kopuksa hiç bilinmiyor
+  const ps = x.psi_s, allUnk = s.bad.link;
+  $('o_psi').textContent = ps == null ? '—' : allUnk ? '?' : (s.unk ? '≥ ' : '') + f(100 * ps, 0);
+  $('o_psi_u').hidden = allUnk;
+  $('o_psibar').style.width = allUnk ? '0%' : pct(ps ?? 0, 1);
+  $('o_psibar').parentElement.classList.toggle('hatch', s.unk);
   const main = x.psi_dom ? CRIT[x.psi_dom - 1][3] : null;
+  const lost = CRIT.filter(([k]) => s.crit[k]?.k === 'unk').map(([, , , t]) => t);
   $('o_psi_cap').textContent = ps == null ? 'Needs wide telemetry'
-    : !main ? 'No stress: nothing is limiting the battery.'
+    : allUnk ? 'Unknown: the BMS is not receiving measurements, so it cannot tell how stressed the battery is.'
+    : s.unk ? `Cannot be fully assessed: the BMS cannot see ${lost.join(' or ')}. ` +
+              (main ? `Known part mainly from ${main}. ` : '') + 'Power is limited because of what it cannot see, not because of measured stress.'
+    : !main ? (st >= 3 ? 'No battery stress: power is limited by a protection rule, not by stress on the cells.'
+                       : 'No stress: nothing is limiting the battery.')
     : `Mainly from ${main}. ` + (st >= 3 ? 'Limp-home rules apply now.'
                                          : `It lowers the power limit by ${f(100 * ps, 0)} %.`);
+  $('o_sees').innerHTML = seesHtml(s, x);
 }
 
 let lastEv = [];
 function alerts(evs) {
   lastEv = evs.filter(e => +e.run_id === 0 && e.code !== 'BUTTON' && e.code !== 'REACTION');
+  // izleme bütünlüğü: son BOOT (neden: WDG-RESET / FLASH-CRC / power-on) ve ondan sonra CAN_TIMEOUT (olaylar yeniden eskiye)
+  const bi = lastEv.findIndex(e => e.code === 'BOOT');
+  if (bi >= 0) boot = { t_ms: +lastEv[bi].t_ms, detail: lastEv[bi].detail };
+  canLost = lastEv.slice(0, bi < 0 ? lastEv.length : bi).some(e => e.code === 'CAN_TIMEOUT');
   const L = lastEv.slice(0, 6);
   $('alerts').innerHTML = L.length ? L.map(e => {
     const st = STATES.indexOf(String(e.code).replace('_', '-')), col = st > 0 ? ST_COL[st] : C.axis;
     const t = new Date(utc(e.rx_at)).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' });
-    return `<li><time>${t}</time><span class="dot" style="background:${col}"></span><span>${esc(EVTXT[e.code] ?? e.code)}</span></li>`;
+    const txt = e.code === 'BOOT' && /WDG/.test(e.detail) ? 'Controller restarted by its watchdog'
+              : e.code === 'BOOT' && /CRC/.test(e.detail) ? 'Controller flash self-check failed' : EVTXT[e.code] ?? e.code;
+    return `<li><time>${t}</time><span class="dot" style="background:${col}"></span><span>${esc(txt)}</span></li>`;
   }).join('') : '<li class="muted">None</li>';
 }
 
