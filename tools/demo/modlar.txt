@@ -6,7 +6,7 @@
 === NORMAL
 +3 h 0             ; Sicak gun kapali
 +0 a 25            ; Ortam 25 C
-+0 k 1             ; NORMAL butonu: servis (paket sogur, park, ECU yeniden baslar, surus)
++0 k 1             ; NORMAL butonu: servis (paket 25-35 C, park, oturunca ECU yeniden baslar, surus)
 bekle state==1 60  ; ECU NORMAL: tam guc
 +30 -              ; Normal surus
 

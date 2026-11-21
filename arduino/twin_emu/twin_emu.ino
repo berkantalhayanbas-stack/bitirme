@@ -34,9 +34,11 @@
  * (< 1 s, bırakınca) hızlı gösterim; uzun basış (>= 1 s) aynı modun "gizli arıza" senaryosu (tezin
  * HIL bulguları). Tekrar basış o arızayı kaldırır (ECU'yu yeniden başlatmaz). LCD 3 s "sebep>mod".
  *   D3  NORMAL   servis: tüm arızaları kaldır, paketi 25-35 °C'ye getir (ortam + 2; ön koşullandırma), DERATE
- *                şarjından önceki SOC'ye dön, park (I = 0) -> ECU'ya 0x301 cmd 0x01 (CAN_CMD_UNLOCK)
- *                3 kez 0,4 s arayla (ECU |I| < 1 A ister; açılıştan sonraki 1 s komut reddeder, fazlası
- *                zararsız) -> 1,5 s sonra sürüş çevrimi. ECU NORMAL'e ~11 s'de (1 s sıfır akım + rampa).
+ *                şarjından önceki SOC'ye dön, park (I = 0); rampa bitip 2 s oturunca (ECU ısınmayı
+ *                yeniden başladıktan sonra görmesin: termal anomali / Psi_Tdot) ECU'ya 0x301 cmd 0x01
+ *                (CAN_CMD_UNLOCK) 0,4 s arayla en çok 3 kez (ECU |I| < 1 A ister). Yeniden başlama
+ *                0x201 boşluğundan (>= 150 ms) görülür; görülmezse tur en çok 3 kez yinelenir. Sonra
+ *                1,5 s bekleyip sürüş çevrimi. ECU NORMAL'e ~11 s'de (1 s sıfır akım + rampa).
  *   A2  DERATE   kısa: dolu bataryaya hızlı şarj (SOC %88, 0,7C) -> hücre gerilimi üst sınıra yaklaşır
  *                -> SOP şarj payı (cause 8) -> DERATE (< 1 s). Tekrar: şarj biter, eski SOC, sürüş.
  *                uzun: soğutma arızası (R_u x4, twin cooling_fault). ECU'ya söylenmez; ECU R_u
@@ -181,8 +183,8 @@ uint8_t  btn_n[N_SC];                      /* basılı kalma süresi (100 ms ad�
 uint8_t  chg_on = 0;                       /* DERATE kısa basış: dolu bataryaya şarj sürüyor */
 float    soc_before = -1.0f;               /* şarj senaryosundan önceki SOC (NORMAL geri yükler) */
 uint8_t  svc = 0;                          /* NORMAL servis adımı: 0 yok, 1 soğut/bekle, 2 komut, 3 sürüşe dön */
-uint32_t svc_t = 0;
-uint8_t  svc_n = 0;
+uint32_t svc_t = 0, svc_t0 = 0;            /* adım zamanı / servis başlangıcı */
+uint8_t  svc_n = 0, svc_round = 0, svc_seen = 0;
 int8_t   ev_sc = -1;                       /* LCD'de gösterilen son bildirim (EV_*, -1 yok) */
 uint8_t  ev_on = 0;
 uint32_t ev_until = 0, t_page = 0;
@@ -381,29 +383,48 @@ void serviceStart(uint32_t now)
   heat_on = 0;
   if (chg_on) chargeFull(0);
   /* ön koşullandırma: paket 25-35 °C'ye (ortam + 2). 23 °C altı veri sayfası şarj sınırı (DERATE),
-   * 43 °C üstü sıcaklık sınırları. 0,5 °C/örnek rampa (servis kısayolu); ısıtma termal anomaliyi
-   * tetikleyebilir ama ECU rampa bitince yeniden başlatılır. Soğuk ortamda paket zamanla (tau ~10 dk)
-   * yine soğur: o zaman DERATE gerçektir. */
+   * 43 °C üstü sıcaklık sınırları. 0,5 °C/örnek rampa (servis kısayolu). Bu ısıtmayı çalışan ECU
+   * açıklanamayan ısı olarak görür (termal anomali LIMP, neden 257; Psi_Tdot): bu yüzden ECU yalnız
+   * rampa bitip paket oturduktan sonra yeniden başlatılır, yeni açılan ECU ısınmayı hiç görmez.
+   * Soğuk ortamda paket zamanla (tau ~10 dk) yine soğur: o zaman DERATE gerçektir. */
   float goal = t_amb + 2.0f;
   goal = goal < 25.0f ? 25.0f : (goal > 35.0f ? 35.0f : goal);
   if (fabsf(tw.ts - goal) > 0.5f) t_pack_goal = goal;
   mode = M_IDLE;                                      /* ECU yeniden başlatmayı |I| < 1 A'da kabul eder */
-  svc = 1;  svc_t = now;  svc_n = 0;
+  svc = 1;  svc_t = svc_t0 = now;  svc_n = 0;  svc_round = 0;  svc_seen = 0;
   Serial.println(F("service: faults cleared, parking"));
 }
 
 void svcStep(uint32_t now)
 {
-  /* durunca ve paket hedefe gelince; 5 s'de olmazsa yine dene (ECU |I| >= 1 A'da reddeder, raporlanır) */
-  if (svc == 1 && ((t_pack_goal > 90.0f && veh_v == 0.0f && now - svc_t >= 1000) || now - svc_t >= 5000)) {
-    svc = 2;  svc_t = now - 400;
+  /* 1: rampa sürüyorsa ya da araç duruyor değilse bekleme saati baştan; 2 s oturunca komut.
+   *    10 s'de olmazsa yine dene (en uzun rampa 4 s; ECU |I| >= 1 A'da reddeder, raporlanır) */
+  if (svc == 1) {
+    if (t_pack_goal < 90.0f || veh_v != 0.0f) svc_t = now;
+    if (now - svc_t >= 2000 || now - svc_t0 >= 10000) { svc = 2;  svc_t = now - 400; }
   }
-  if (svc == 2 && now - svc_t >= 400) {               /* 3 kez; ECU ilk 1 s'de gelenleri reddeder */
+  /* yeniden başlama kanıtı: 0x201 adım başında normalde ~100 ms yaşında; ECU sıfırlanınca en az bir
+   * cevap eksik (açılış + ölçüm çifti beklemesi) -> >= 150 ms. Komut adım başında gider, ECU hemen
+   * sıfırlanır, sonraki adımda görülür. */
+  if (svc >= 2 && have_ctrl && now - mon_ctrl.last_ok_ms >= 150) {
+    if (!svc_seen) Serial.println(F("service: ECU restart seen"));
+    svc_seen = 1;
+    if (svc == 2) { svc = 3;  svc_t = now; }          /* kalan komutlar gereksiz (ECU 1 s reddeder) */
+  }
+  if (svc == 2 && now - svc_t >= 400) {               /* en çok 3 kez, 0,4 s arayla */
     sendCommand(CAN_CMD_ECU_RESTART, CAN_CMD_UNLOCK, now);
     svc_t = now;
     if (++svc_n >= 3) svc = 3;
   }
-  if (svc == 3 && now - svc_t >= 1500) { svc = 0;  mode = M_PROF;  Serial.println(F("service: done, driving")); }
+  if (svc == 3 && now - svc_t >= 1500) {
+    if (!svc_seen && ++svc_round < 3) {               /* reddedildi ya da gitmedi: turu yinele */
+      Serial.println(F("service: ECU restart not seen, retrying"));
+      svc = 2;  svc_t = now - 400;  svc_n = 0;
+    } else {
+      svc = 0;  mode = M_PROF;
+      Serial.println(svc_seen ? F("service: done, driving") : F("service: ECU did not restart, driving"));
+    }
+  }
 }
 
 /* buton k (seri "k <1-5>" kısa, "l <1-5>" uzun da buraya gelir); dosya başındaki tablo */
