@@ -251,7 +251,7 @@
       <div class="kpi"><b id="k_tm">—</b><span>Measured temp. (°C)</span></div>
       <div class="kpi"><b id="k_vg">—</b><span>Group V min / max (V)</span></div>
       <div class="kpi"><b id="k_dv">—</b><span>Group spread (mV)</span></div>
-      <div class="kpi"><b id="k_soh">—</b><span>SOH (%)</span></div>
+      <div class="kpi"><b id="k_soh">—</b><span>SOH from resistance (%)</span></div>
       <div class="kpi"><b id="k_can">—</b><span>CAN TEC / REC</span></div>
     </div>
     <p class="note" id="wide_hint">Only the basic fields are arriving. Measured current, voltages and surface temperature need the ECU built with BMS_TELEMETRY=2.</p>
@@ -335,6 +335,11 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const $ = id => document.getElementById(id);
 const num = v => v == null ? null : +v;
 const f = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
+// direnç tabanlı SOH: Kirkaldy 40 hücre k_R = 1 + 1,31 (1 - SOH) -> SOH = 1 - (k_R - 1) / 1,31 (C:\bitirme\veri\age_resistance.py).
+// EKF k_R açılıştan sonra 120 s donuk (EKF_N_KR_FREEZE): o sürede değer yok
+const AGE_BETA = 1.31, KR_FREEZE_MS = 120000;
+const sohR = x => x.k_r == null || x.t_ms == null || x.t_ms < KR_FREEZE_MS ? null
+                  : Math.max(0, Math.min(100, 100 * (1 - (x.k_r - 1) / AGE_BETA)));
 const causeText = c => c == null ? null : CAUSES.filter(([b]) => c & b).map(([, t]) => t);
 const utc = s => Date.parse(String(s).replace(' ', 'T') + 'Z');      // sunucu zamanı UTC
 
@@ -545,7 +550,7 @@ function kpis(x) {
   $('k_tm').textContent = f(x.t_meas);
   $('k_vg').textContent = x.v_min == null ? '—' : `${f(x.v_min, 3)} / ${f(x.v_max, 3)}`;
   $('k_dv').textContent = x.v_min == null ? '—' : f(1000 * (x.v_max - x.v_min), 0);
-  $('k_soh').textContent = f(x.soh);
+  $('k_soh').textContent = sohR(x) == null ? (x.k_r == null ? '—' : 'learning') : f(sohR(x), 0);
   $('k_can').textContent = `${x.tec} / ${x.rec}`;
   $('kpi_t').textContent = `run ${x.run_id}, ECU t = ${(x.t_ms / 1000).toFixed(1)} s`;
   $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `badge s${x.state}`;
@@ -765,7 +770,8 @@ function overview(x) {
     $('o_dv').textContent = f(1000 * (x.v_max - x.v_min), 0);
     $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)`;
   } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
-  $('o_soh_cap').textContent = `Battery health ${f(x.soh, 0)} %`;
+  $('o_soh_cap').textContent = sohR(x) == null ? (x.k_r == null ? ' ' : 'Battery health: learning (first 2 min)')
+                                               : `Battery health ~${f(sohR(x), 0)} % (from cell resistance)`;
   // stres indeksi Ψ: sade dille baskın kriter; durum renkleri yalnız durum için, çubuk nötr
   // girişi kaybolan kriter varsa "stres yok" denmez: değer alt sınır, hat kopuksa hiç bilinmiyor
   const ps = x.psi_s, allUnk = s.bad.link;
