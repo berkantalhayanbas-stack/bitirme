@@ -5,6 +5,7 @@
 
 === Hazirlik
 +3 a 25            ; Ortam 25 C (oda sicakligindan bagimsiz)
++0 v 43            ; Ariza siddeti varsayilan (R_u x4, 0,5 C/s): A0 potundan bagimsiz
 +0 k 1             ; NORMAL butonu: servis (paket 25-35 C, ECU yeniden baslar, surus)
 bekle state==1 60  ; ECU NORMAL
 
