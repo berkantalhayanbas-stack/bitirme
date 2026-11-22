@@ -1,0 +1,193 @@
+VERSION "bms_ecu 1.0"
+
+NS_ :
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	BA_DEF_DEF_
+
+BS_:
+
+BU_: EMU ECU PC
+
+
+BO_ 257 EMU_Meas1: 8 EMU
+ SG_ Pack_V : 0|16@1+ (0.1,0) [0|6553.5] "V" ECU
+ SG_ Pack_I : 16|16@1- (0.1,0) [-3276.8|3276.7] "A" ECU
+ SG_ Pack_T : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" ECU
+ SG_ Meas1_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Meas1_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 258 EMU_Meas2: 8 EMU
+ SG_ Cell_V_min : 0|16@1+ (0.001,0) [0|65.535] "V" ECU
+ SG_ Cell_V_max : 16|16@1+ (0.001,0) [0|65.535] "V" ECU
+ SG_ Ambient_T : 32|16@1- (0.1,0) [-3276.8|3276.7] "degC" ECU
+ SG_ Meas2_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Meas2_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 272 EMU_Cells0: 8 EMU
+ SG_ Group01_V : 0|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group02_V : 12|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group03_V : 24|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group04_V : 36|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Cells0_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Cells0_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+ SG_ Group01_BalFb : 52|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group02_BalFb : 53|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group03_BalFb : 54|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group04_BalFb : 55|1@1+ (1,0) [0|1] "" ECU
+
+BO_ 273 EMU_Cells1: 8 EMU
+ SG_ Group05_V : 0|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group06_V : 12|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group07_V : 24|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group08_V : 36|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Cells1_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Cells1_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+ SG_ Group05_BalFb : 52|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group06_BalFb : 53|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group07_BalFb : 54|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group08_BalFb : 55|1@1+ (1,0) [0|1] "" ECU
+
+BO_ 274 EMU_Cells2: 8 EMU
+ SG_ Group09_V : 0|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group10_V : 12|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group11_V : 24|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group12_V : 36|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Cells2_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Cells2_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+ SG_ Group09_BalFb : 52|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group10_BalFb : 53|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group11_BalFb : 54|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group12_BalFb : 55|1@1+ (1,0) [0|1] "" ECU
+
+BO_ 275 EMU_Cells3: 8 EMU
+ SG_ Group13_V : 0|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group14_V : 12|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group15_V : 24|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group16_V : 36|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Cells3_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Cells3_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+ SG_ Group13_BalFb : 52|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group14_BalFb : 53|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group15_BalFb : 54|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group16_BalFb : 55|1@1+ (1,0) [0|1] "" ECU
+
+BO_ 276 EMU_Cells4: 8 EMU
+ SG_ Group17_V : 0|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group18_V : 12|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Group19_V : 24|12@1+ (0.001,1) [1|5.094] "V" ECU
+ SG_ Cells4_Spare : 36|12@1+ (1,0) [0|4095] "" Vector__XXX
+ SG_ Cells4_Counter : 48|4@1+ (1,0) [0|15] "" ECU
+ SG_ Cells4_CRC : 56|8@1+ (1,0) [0|255] "" ECU
+ SG_ Group17_BalFb : 52|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group18_BalFb : 53|1@1+ (1,0) [0|1] "" ECU
+ SG_ Group19_BalFb : 54|1@1+ (1,0) [0|1] "" ECU
+
+BO_ 513 ECU_Ctrl: 8 ECU
+ SG_ I_allow_dis : 0|16@1+ (0.1,0) [0|6553.5] "A" EMU
+ SG_ I_allow_chg : 16|16@1+ (0.1,0) [0|6553.5] "A" EMU
+ SG_ State : 32|4@1+ (1,0) [0|15] "" EMU
+ SG_ Cause : 40|8@1+ (1,0) [0|255] "" EMU
+ SG_ Ctrl_Counter : 48|4@1+ (1,0) [0|15] "" EMU
+ SG_ Ctrl_CRC : 56|8@1+ (1,0) [0|255] "" EMU
+
+BO_ 514 ECU_Status: 8 ECU
+ SG_ SOC : 0|16@1+ (0.01,0) [0|655.35] "%" EMU
+ SG_ Tcore_est : 16|16@1- (0.1,0) [-3276.8|3276.7] "degC" EMU
+ SG_ SOH : 32|8@1+ (0.5,0) [0|127.5] "%" EMU
+ SG_ Psi : 40|8@1+ (0.005,0) [0|1.275] "" EMU
+ SG_ Status_Counter : 48|4@1+ (1,0) [0|15] "" EMU
+ SG_ Status_CRC : 56|8@1+ (1,0) [0|255] "" EMU
+
+BO_ 528 ECU_Bal: 8 ECU
+ SG_ Bal_Group01 : 0|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group02 : 1|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group03 : 2|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group04 : 3|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group05 : 4|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group06 : 5|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group07 : 6|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group08 : 7|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group09 : 8|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group10 : 9|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group11 : 10|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group12 : 11|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group13 : 12|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group14 : 13|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group15 : 14|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group16 : 15|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group17 : 16|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group18 : 17|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Group19 : 18|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Active : 24|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Stale : 25|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Drive : 26|1@1+ (1,0) [0|1] "" EMU
+ SG_ Bal_Blocked : 27|1@1+ (1,0) [0|1] "" EMU
+ SG_ Cell_dV : 32|16@1+ (0.0001,0) [0|6.5535] "V" EMU
+ SG_ Bal_Counter : 48|4@1+ (1,0) [0|15] "" EMU
+ SG_ Bal_CRC : 56|8@1+ (1,0) [0|255] "" EMU
+
+BO_ 769 PC_Cmd: 8 PC
+ SG_ Cmd : 0|8@1+ (1,0) [0|255] "" ECU,EMU
+ SG_ Cmd_Value : 8|16@1- (1,0) [-32768|32767] "" ECU,EMU
+ SG_ Cmd_Counter : 48|4@1+ (1,0) [0|15] "" ECU,EMU
+ SG_ Cmd_CRC : 56|8@1+ (1,0) [0|255] "" ECU,EMU
+
+
+CM_ "BMS ECU CAN database (classic CAN 500 kbit/s, Intel byte order). Single source: bms/common/bms_can.c; every frame ends with a 4-bit alive counter (byte 6, low nibble) and CRC-8 SAE J1850 (poly 0x1D, init/xorout 0xFF) in byte 7 over [ID low byte, ID high byte, data 0..6] (AUTOSAR E2E data-ID idea). Receiver: counter step 1 normal, 2..3 accepted with loss, 0 or >3 rejected; 0x101/0x102 missing 500 ms -> SAFE-STOP.";
+CM_ BO_ 257 "Pack measurement, 100 ms. Pack_I positive = discharge.";
+CM_ BO_ 258 "Group voltage extremes and ambient temperature, 100 ms.";
+CM_ BO_ 513 "ECU control, every BMS step (100 ms): allowed currents, state and cause byte.";
+CM_ BO_ 514 "ECU status, every BMS step: SOC, core temperature estimate, SOH, Psi = 1 - I_allow_dis / I_nom.";
+CM_ BO_ 528 "Passive balancing command, every BMS step; EMU opens all switches if absent for 250 ms.";
+CM_ BO_ 769 "Event message (not periodic, no timeout). Accepted if CRC ok and counter differs from the last accepted command. ECU ignores all commands for 1 s after boot. EMU commands read Cmd_Value as uint16 duration [ms] (0 = until 0x10).";
+CM_ SG_ 513 State "1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP.";
+CM_ SG_ 513 Cause "Bit field: 1 thermal derate, 2 cooling alarm, 4 SOP discharge, 8 SOP charge, 16 datasheet T limit, 32 sensor fault, 64 SOC empty, 128 hard limit (SAFE). Thermal anomaly and temperature rise rate also set bit 1; resistance growth (1024) and thermal event (2048) exist only in UART telemetry.";
+CM_ SG_ 769 Cmd "0x01-0x0F ECU, 0x10-0x1F EMU fault injection.";
+CM_ SG_ 769 Cmd_Value "0x01 and 0x04 require 0xA5A5 (-23131); 0x02: SOC in 0.01 %.";
+CM_ SG_ 528 Cell_dV "V_max - V_min of the 19 groups.";
+CM_ BO_ 272 "Group voltages 1..4, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
+CM_ BO_ 273 "Group voltages 5..8, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
+CM_ BO_ 274 "Group voltages 9..12, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
+CM_ BO_ 275 "Group voltages 13..16, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
+CM_ BO_ 276 "Group voltages 17..19, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 10000;
+BA_DEF_ BO_ "GenMsgSendType" ENUM "Cyclic","Event";
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_DEF_DEF_ "GenMsgSendType" "Cyclic";
+BA_ "GenMsgCycleTime" BO_ 257 100;
+BA_ "GenMsgCycleTime" BO_ 258 100;
+BA_ "GenMsgCycleTime" BO_ 272 100;
+BA_ "GenMsgCycleTime" BO_ 273 100;
+BA_ "GenMsgCycleTime" BO_ 274 100;
+BA_ "GenMsgCycleTime" BO_ 275 100;
+BA_ "GenMsgCycleTime" BO_ 276 100;
+BA_ "GenMsgCycleTime" BO_ 513 100;
+BA_ "GenMsgCycleTime" BO_ 514 100;
+BA_ "GenMsgCycleTime" BO_ 528 100;
+BA_ "GenMsgSendType" BO_ 769 1;
+
+VAL_ 513 State 1 "NORMAL" 2 "DERATE" 3 "LIMP_HOME" 4 "SAFE_STOP" ;
+VAL_ 769 Cmd 1 "ECU_RESTART" 2 "ECU_SET_SOC" 3 "ECU_CLR_STATS" 4 "ECU_HANG" 16 "EMU_CLEAR" 17 "EMU_CRC" 18 "EMU_FREEZE" 19 "EMU_SILENT" 20 "EMU_NTC_OPEN" ;
+VAL_ 272 Group01_V 4095 "Invalid" ;
+VAL_ 272 Group02_V 4095 "Invalid" ;
+VAL_ 272 Group03_V 4095 "Invalid" ;
+VAL_ 272 Group04_V 4095 "Invalid" ;
+VAL_ 273 Group05_V 4095 "Invalid" ;
+VAL_ 273 Group06_V 4095 "Invalid" ;
+VAL_ 273 Group07_V 4095 "Invalid" ;
+VAL_ 273 Group08_V 4095 "Invalid" ;
+VAL_ 274 Group09_V 4095 "Invalid" ;
+VAL_ 274 Group10_V 4095 "Invalid" ;
+VAL_ 274 Group11_V 4095 "Invalid" ;
+VAL_ 274 Group12_V 4095 "Invalid" ;
+VAL_ 275 Group13_V 4095 "Invalid" ;
+VAL_ 275 Group14_V 4095 "Invalid" ;
+VAL_ 275 Group15_V 4095 "Invalid" ;
+VAL_ 275 Group16_V 4095 "Invalid" ;
+VAL_ 276 Group17_V 4095 "Invalid" ;
+VAL_ 276 Group18_V 4095 "Invalid" ;
+VAL_ 276 Group19_V 4095 "Invalid" ;
