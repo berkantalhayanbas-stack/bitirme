@@ -67,8 +67,12 @@
                                                 (tools/web/gateway.py); 2: ayrıca geniş "DX,..." satırı
                                                 (tools/live_panel.py) */
 #endif
+#ifndef BMS_CANLOG
+#define BMS_CANLOG 0                         /* 1: alınan/gönderilen her CAN çerçevesi "C,<t_ms>,<R|T>,<id>,<veri>"
+                                                satırı (tools/can/can_log.py -> candump, SavvyCAN); ~3,2 kB/s */
+#endif
 
-#define SOC0_EKF  0.5f                      /* EKF başlangıç SOC'si (PIL ile aynı) */
+#define SOC0_EKF  0.5f                     /* EKF başlangıç SOC'si (PIL ile aynı) */
 #define ECU_STEP_LATE_MS  150u               /* ölçüm çifti bu kadar gecikirse tutulan değerle adım */
 #define ECU_STEP_HOLD_MS  100u               /* tutulan değerle adım periyodu (BMS_TS) */
 /* Açılışta ilk 50 ms'de gelen çerçeveler atılır: ECU sıfırlanırken hatta ACK veren olmadığından EMU
@@ -154,6 +158,23 @@ static void put_x8(uint8_t v)
     put_s(b);
 }
 static void kv(const char *k, uint32_t v) { put_s(k); put_u(v); }
+#if BMS_CANLOG
+/* Ham çerçeve kaydı: C,<t_ms>,<R|T>,<id 3 hex>,<len x 2 hex> */
+static void canlog(uint32_t t_ms, char dir, uint16_t id, const uint8_t *d, uint8_t len)
+{
+    const char h[] = "0123456789ABCDEF";
+    char b[48];
+    uint32_t n = 0;
+    b[n++] = ',';  b[n++] = dir;  b[n++] = ',';
+    b[n++] = h[(id >> 8) & 15u];  b[n++] = h[(id >> 4) & 15u];  b[n++] = h[id & 15u];  b[n++] = ',';
+    for (uint8_t i = 0; i < len && i < 8u; i++) { b[n++] = h[d[i] >> 4];  b[n++] = h[d[i] & 15u]; }
+    b[n++] = '\r';  b[n++] = '\n';  b[n] = 0;
+    put_s("C,");  put_u(t_ms);  put_s(b);
+}
+#define CANLOG(t, dir, id, d, len) canlog((t), (dir), (id), (d), (len))
+#else
+#define CANLOG(t, dir, id, d, len) ((void)0)
+#endif
 static void kf(const char *k, float v)       /* bir ondalık basamak */
 {
     int32_t x = (int32_t)(v * 10.0f + (v < 0.0f ? -0.5f : 0.5f));
@@ -366,6 +387,7 @@ void ecu_run(void)
             uint16_t id;  uint8_t d[8], len, c;
             while (can_get(&id, d, &len)) {
                 if (now_ms <= ECU_RX_FLUSH_MS) { n_flush++; continue; }   /* bayat açılış çerçeveleri */
+                CANLOG(now_ms, 'R', id, d, len);
                 if (len != 8) { other++; continue; }
                 if (id == CAN_ID_EMU_MEAS1) {
                     can_meas1_t a;
@@ -438,20 +460,23 @@ void ecu_run(void)
 #endif
             if (send_ctrl) {
                 can_encode_ctrl(&ctrl, cnt_ctrl, d);
-                if (bsp_can_send(CAN_ID_ECU_CTRL, d, 8)) { tx_ok++; cnt_ctrl = (cnt_ctrl + 1u) & 0x0Fu; }
+                if (bsp_can_send(CAN_ID_ECU_CTRL, d, 8)) { tx_ok++; cnt_ctrl = (cnt_ctrl + 1u) & 0x0Fu;
+                                                           CANLOG(now_ms, 'T', CAN_ID_ECU_CTRL, d, 8); }
                 else tx_busy++;
             }
             if (send_stat) {
                 const can_status_t st = { 100.0f * out.soc, out.tc, 100.0f * soh, out.dec.psi };
                 can_encode_status(&st, cnt_stat, d);
-                if (bsp_can_send(CAN_ID_ECU_STATUS, d, 8)) { tx_ok++; cnt_stat = (cnt_stat + 1u) & 0x0Fu; }
+                if (bsp_can_send(CAN_ID_ECU_STATUS, d, 8)) { tx_ok++; cnt_stat = (cnt_stat + 1u) & 0x0Fu;
+                                                             CANLOG(now_ms, 'T', CAN_ID_ECU_STATUS, d, 8); }
                 else tx_busy++;
                 /* adım 8: dengeleme kararı (bms_step'ten bağımsız; PIL/SIL zincirini değiştirmez) */
                 const uint8_t v_ok = cells_ok();
                 const can_bal_t bm = { bal_step(&bal, vcell, v_ok, m1.I, out.dec.state, out.tc),
                                        bal.flags, v_ok ? bal.v_max - bal.v_min : 0.0f };
                 can_encode_bal(&bm, cnt_bal, d);
-                if (bsp_can_send(CAN_ID_ECU_BAL, d, 8)) { tx_ok++; cnt_bal = (cnt_bal + 1u) & 0x0Fu; }
+                if (bsp_can_send(CAN_ID_ECU_BAL, d, 8)) { tx_ok++; cnt_bal = (cnt_bal + 1u) & 0x0Fu;
+                                                          CANLOG(now_ms, 'T', CAN_ID_ECU_BAL, d, 8); }
                 else tx_busy++;
             }
 #if BMS_TELEMETRY
