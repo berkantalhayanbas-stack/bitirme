@@ -146,7 +146,7 @@ CM_ BO_ 769 "Event message (not periodic, no timeout). Accepted if CRC ok and co
 CM_ SG_ 513 State "1 NORMAL, 2 DERATE, 3 LIMP-HOME, 4 SAFE-STOP.";
 CM_ SG_ 513 Cause "Bit field: 1 thermal derate, 2 cooling alarm, 4 SOP discharge, 8 SOP charge, 16 datasheet T limit, 32 sensor fault, 64 SOC empty, 128 hard limit (SAFE). Thermal anomaly and temperature rise rate also set bit 1; resistance growth (1024) and thermal event (2048) exist only in UART telemetry.";
 CM_ SG_ 769 Cmd "0x01-0x0F ECU, 0x10-0x1F EMU fault injection.";
-CM_ SG_ 769 Cmd_Value "0x01 and 0x04 require 0xA5A5 (-23131); 0x02: SOC in 0.01 %.";
+CM_ SG_ 769 Cmd_Value "0x01, 0x04 and 0x05 require 0xA5A5 (-23131); 0x02: SOC in 0.01 %.";
 CM_ SG_ 528 Cell_dV "V_max - V_min of the 19 groups.";
 CM_ BO_ 272 "Group voltages 1..4, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
 CM_ BO_ 273 "Group voltages 5..8, 100 ms, 4 x 12 bit, V = 1.000 V + raw x 1 mV, raw 0xFFF = invalid. Byte 6 high nibble = balancing switch feedback per slot. Timeout only disables balancing.";
@@ -171,7 +171,7 @@ BA_ "GenMsgCycleTime" BO_ 528 100;
 BA_ "GenMsgSendType" BO_ 769 1;
 
 VAL_ 513 State 1 "NORMAL" 2 "DERATE" 3 "LIMP_HOME" 4 "SAFE_STOP" ;
-VAL_ 769 Cmd 1 "ECU_RESTART" 2 "ECU_SET_SOC" 3 "ECU_CLR_STATS" 4 "ECU_HANG" 16 "EMU_CLEAR" 17 "EMU_CRC" 18 "EMU_FREEZE" 19 "EMU_SILENT" 20 "EMU_NTC_OPEN" ;
+VAL_ 769 Cmd 1 "ECU_RESTART" 2 "ECU_SET_SOC" 3 "ECU_CLR_STATS" 4 "ECU_HANG" 5 "ECU_NEW_PACK" 16 "EMU_CLEAR" 17 "EMU_CRC" 18 "EMU_FREEZE" 19 "EMU_SILENT" 20 "EMU_NTC_OPEN" ;
 VAL_ 272 Group01_V 4095 "Invalid" ;
 VAL_ 272 Group02_V 4095 "Invalid" ;
 VAL_ 272 Group03_V 4095 "Invalid" ;

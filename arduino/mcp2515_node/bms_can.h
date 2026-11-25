@@ -51,6 +51,8 @@ enum {
     CAN_CMD_ECU_HANG      = 0x04,  /* watchdog testi: value = CAN_CMD_UNLOCK -> sonsuz döngü; IWDG
                                       ~100 ms'de sıfırlar, ECU "WDG reset" ile SAFE-STOP'ta açılır.
                                       Yalnız BMS_SAFETY derlemesinde; diğerlerinde bilinmeyen komut */
+    CAN_CMD_ECU_NEW_PACK  = 0x05,  /* yeni paket takıldı: value = CAN_CMD_UNLOCK, |I| < CAN_CMD_RESTART_I_A;
+                                      öğrenilmiş SOH kaydını (flash) siler, SOH %100'den yeniden öğrenilir */
     CAN_CMD_EMU_CLEAR     = 0x10,  /* tüm enjekte hataları kaldır */
     CAN_CMD_EMU_CRC       = 0x11,  /* CRC'yi boz */
     CAN_CMD_EMU_FREEZE    = 0x12,  /* alive counter'ı dondur */

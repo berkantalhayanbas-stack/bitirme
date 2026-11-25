@@ -18,7 +18,9 @@ function db_file(): string {
 const TELEMETRY_X = ['cause' => 'INTEGER', 'ts' => 'REAL', 'i_chg' => 'REAL', 'psi' => 'REAL', 'i_meas' => 'REAL',
                      'v_pack' => 'REAL', 't_meas' => 'REAL', 'v_min' => 'REAL', 'v_max' => 'REAL',
                      'psi_t' => 'REAL', 'psi_c' => 'REAL', 'psi_tdot' => 'REAL', 'psi_h' => 'REAL',
-                     'psi_s' => 'REAL', 'psi_dom' => 'INTEGER', 'tdot' => 'REAL', 'k_r' => 'REAL'];
+                     'psi_s' => 'REAL', 'psi_dom' => 'INTEGER', 'tdot' => 'REAL', 'k_r' => 'REAL',
+                     'soh_c' => 'REAL', 'soh_n' => 'INTEGER', 'efc' => 'REAL', 'soh_anchor' => 'INTEGER',
+                     'rest_s' => 'INTEGER', 'soh_ratio' => 'REAL'];
 
 function db(): PDO {
     static $pdo = null;

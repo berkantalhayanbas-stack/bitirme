@@ -482,3 +482,108 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
                   o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, o->kr, &o->dec);
 }
+
+void bms_set_capacity(bms_t *b, float soh) { b->ekf.q_ah = soh * SOH_Q_NOM; }
+void bms_set_kr(bms_t *b, float k_r) { b->ekf.x[4] = clampf(k_r, EKF_KR_MIN, EKF_KR_MAX); }
+
+/* =================================================================== kapasite SOH'u (park-park arası)
+ * Dinlenme 20 dk sürünce bir nokta alınır: son 10 s'nin ortalama hücre gerilimi (gevşeme bitmiş) OCV
+ * tablosunun tersinden SOC verir; aynı pencerenin akım ortalaması sensör ofsetini yeniler. İlk geçerli nokta
+ * çapa olur; sonraki noktada |dSOC| yeterliyse kapasite = çapadan beri sayılan Ah / dSOC. Kazanç ölçümün
+ * kalitesine (|dSOC|) ve ölçüm sayısına bağlı (ilk ölçüm %100 önselini yarı yola taşır). EKF'den bağımsız.
+ * Sıra ve denklemler twin/soh_capacity.py ile aynı (float32). */
+float soc_from_ocv(float ocv_cell, float *slope)
+{   /* tablonun tersi, doğrusal ara değer; slope = bulunan aralığın dOCV/dSOC'si [V] */
+    int k = 1;
+    while (k < SOH_OCV_N - 1 && ocv_cell > SOH_OCV_V[k]) k++;
+    const float v0 = SOH_OCV_V[k - 1], v1 = SOH_OCV_V[k], s0 = SOH_OCV_SOC[k - 1], s1 = SOH_OCV_SOC[k];
+    *slope = (v1 - v0) / (s1 - s0);
+    return clampf(s0 + (ocv_cell - v0) * (s1 - s0) / (v1 - v0), 0.0f, 1.0f);
+}
+
+void soh_init(soh_t *s, const soh_rec_t *rec)
+{
+    memset(s, 0, sizeof(*s));
+    if (rec) s->r = *rec;
+    else { s->r.soh_c = 1.0f;  s->r.soh_disp = 1.0f;  s->r.k_r = 1.0f; }
+    s->ah_saved = s->r.ah_total;
+    s->kr_saved = s->r.k_r;
+}
+
+void soh_reset_anchor(soh_t *s)
+{
+    if (s->r.anchor) s->persist = 1u;            /* kayıttaki çapa da düşsün */
+    s->r.anchor = 0u;  s->n_rest = 0;  s->ocv_sum = s->i_sum = 0.0f;
+}
+
+static void soh_point(soh_t *s, float T_meas, float k_r)
+{
+    float slope;
+    const float soc = soc_from_ocv(s->ocv_sum / (float)SOH_N_AVG, &slope);
+    s->b0 = s->i_sum / (float)SOH_N_AVG;         /* dinlenmede gerçek akım ~0: ölçülen ortalama = ofset */
+    const uint8_t ok = T_meas >= SOH_T_MIN && T_meas <= SOH_T_MAX && slope >= SOH_SLOPE_MIN;
+    s->last_soc = soc;
+    if (!ok) {
+        s->event = SOH_EV_POINT;                 /* geçersiz uç: çapa korunur, Ah sayımı sürer */
+    } else if (!s->r.anchor) {
+        s->r.anchor = 1u;  s->r.soc_a = soc;  s->r.ah_a = 0.0f;  s->n_anchor = 0;
+        s->persist = 1u;
+        s->event = SOH_EV_ANCHOR;
+    } else {
+        const float dsoc = s->r.soc_a - soc;
+        if (fabsf(dsoc) < SOH_DSOC_MIN) {
+            s->event = SOH_EV_SMALL;             /* çapa korunur: kısa park ölçümü bölmez */
+        } else {
+            const float ratio = s->r.ah_a / dsoc / SOH_Q_NOM;
+            s->last_ratio = ratio;
+            if (ratio >= SOH_R_MIN && ratio <= SOH_R_MAX) {
+                const float w = minf(1.0f, fabsf(dsoc) / SOH_DSOC_W);
+                const float n = (float)(s->r.n_meas < (uint32_t)SOH_N_MAX - 1u ? s->r.n_meas
+                                                                              : (uint32_t)SOH_N_MAX - 1u) + 1.0f;
+                s->r.soh_c += w / (n + w) * (ratio - s->r.soh_c);
+                s->r.soh_disp = minf(1.0f, s->r.soh_c < s->r.soh_disp ? s->r.soh_c
+                                                     : minf(s->r.soh_c, s->r.soh_disp + SOH_DISP_UP));
+                s->r.n_meas++;
+                s->event = SOH_EV_ACCEPT;
+            } else {
+                s->event = SOH_EV_RANGE;
+            }
+            s->r.soc_a = soc;  s->r.ah_a = 0.0f;  s->n_anchor = 0;   /* bu nokta yeni çapa */
+            s->persist = 1u;
+        }
+    }
+    s->r.k_r = k_r;
+    if (fabsf(s->r.ah_total - s->ah_saved) >= SOH_AH_SAVE || fabsf(s->r.k_r - s->kr_saved) >= SOH_KR_SAVE)
+        s->persist = 1u;
+}
+
+void soh_step(soh_t *s, const bms_in_t *in, const bms_out_t *o)
+{
+    s->event = SOH_EV_NONE;
+    if (s->n_zero < DEC_N_ZERO) {                /* açılış: kontaktör açık, I_allow = 0 (A9) */
+        s->b0 += in->I;
+        if (++s->n_zero == DEC_N_ZERO) s->b0 /= (float)DEC_N_ZERO;
+        return;
+    }
+    const float i = in->I - s->b0;
+    const uint8_t valid = o->t_valid && o->i_valid && in->can_ok;
+    s->r.ah_total += fabsf(i) * (BMS_TS / 3600.0f);
+    if (!valid) soh_reset_anchor(s);
+    if (s->r.anchor) {
+        s->r.ah_a += i * (BMS_TS / 3600.0f);
+        if (++s->n_anchor > SOH_N_ANCHOR) soh_reset_anchor(s);
+    }
+    s->i_f += SOH_I_FILT * (i - s->i_f);
+    if (valid && fabsf(s->i_f) < SOH_I_REST) {
+        if (s->n_rest < SOH_N_REST) {
+            s->n_rest++;
+            if (s->n_rest > SOH_N_REST - SOH_N_AVG) {
+                s->ocv_sum += in->V / (float)BMS_NS;
+                s->i_sum += in->I;
+            }
+            if (s->n_rest == SOH_N_REST) soh_point(s, in->T, o->kr);
+        }
+    } else {
+        s->n_rest = 0;  s->ocv_sum = s->i_sum = 0.0f;
+    }
+}

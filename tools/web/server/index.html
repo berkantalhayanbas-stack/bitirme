@@ -208,6 +208,21 @@
     </div>
     <div class="sees" id="o_sees"></div>
   </section>
+  <!-- akü sağlığı: telefonlardaki "Pil Sağlığı" gibi; kapasite park-park arası öğrenilir, flash'ta kalıcı -->
+  <section class="tile">
+    <div class="stress">
+      <div>
+        <h3>Battery health</h3>
+        <div class="big"><span id="o_soh">—</span><small>%</small></div>
+      </div>
+      <div>
+        <p class="cap"><b>Maximum capacity</b> — usable capacity compared with a new pack</p>
+        <p class="cap" id="o_perf">&nbsp;</p>
+        <p class="cap" id="o_cyc">&nbsp;</p>
+        <p class="cap" id="o_learn">&nbsp;</p>
+      </div>
+    </div>
+  </section>
   <section class="tile">
     <h3>Power used and available <span class="muted">· last minute</span></h3>
     <div class="plot" style="height:200px"><canvas id="c_pow"></canvas></div>
@@ -251,7 +266,8 @@
       <div class="kpi"><b id="k_tm">—</b><span>Measured temp. (°C)</span></div>
       <div class="kpi"><b id="k_vg">—</b><span>Group V min / max (V)</span></div>
       <div class="kpi"><b id="k_dv">—</b><span>Group spread (mV)</span></div>
-      <div class="kpi"><b id="k_soh">—</b><span>SOH from resistance (%)</span></div>
+      <div class="kpi"><b id="k_soh">—</b><span>Capacity SOH learned / shown (%)</span></div>
+      <div class="kpi"><b id="k_sohr">—</b><span>SOH from resistance (%)</span></div>
       <div class="kpi"><b id="k_can">—</b><span>CAN TEC / REC</span></div>
     </div>
     <p class="note" id="wide_hint">Only the basic fields are arriving. Measured current, voltages and surface temperature need the ECU built with BMS_TELEMETRY=2.</p>
@@ -338,6 +354,8 @@ const f = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
 // direnç tabanlı SOH: Kirkaldy 40 hücre k_R = 1 + 1,31 (1 - SOH) -> SOH = 1 - (k_R - 1) / 1,31 (C:\bitirme\veri\age_resistance.py).
 // EKF k_R açılıştan sonra 120 s donuk (EKF_N_KR_FREEZE): o sürede değer yok
 const AGE_BETA = 1.31, KR_FREEZE_MS = 120000;
+// akü sağlığı kartı: k_R >= 1,2 (DEC_KR_ON) = performans kısıtlı; kapasite noktası 20 dk dinlenmede (SOH_N_REST)
+const KR_PERF = 1.2, REST_S = 1200;
 const sohR = x => x.k_r == null || x.t_ms == null || x.t_ms < KR_FREEZE_MS ? null
                   : Math.max(0, Math.min(100, 100 * (1 - (x.k_r - 1) / AGE_BETA)));
 const causeText = c => c == null ? null : CAUSES.filter(([b]) => c & b).map(([, t]) => t);
@@ -550,7 +568,8 @@ function kpis(x) {
   $('k_tm').textContent = f(x.t_meas);
   $('k_vg').textContent = x.v_min == null ? '—' : `${f(x.v_min, 3)} / ${f(x.v_max, 3)}`;
   $('k_dv').textContent = x.v_min == null ? '—' : f(1000 * (x.v_max - x.v_min), 0);
-  $('k_soh').textContent = sohR(x) == null ? (x.k_r == null ? '—' : 'learning') : f(sohR(x), 0);
+  $('k_soh').textContent = x.soh_c == null ? f(x.soh, 1) : `${f(x.soh_c, 1)} / ${f(x.soh, 1)}`;
+  $('k_sohr').textContent = sohR(x) == null ? (x.k_r == null ? '—' : 'learning') : f(sohR(x), 0);
   $('k_can').textContent = `${x.tec} / ${x.rec}`;
   $('kpi_t').textContent = `run ${x.run_id}, ECU t = ${(x.t_ms / 1000).toFixed(1)} s`;
   $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `badge s${x.state}`;
@@ -565,7 +584,8 @@ async function live() {
     for (const x of j.rows) {
       for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
                        'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h',
-                       'psi_s', 'psi_dom', 'tdot', 'k_r']) x[k] = num(x[k]);
+                       'psi_s', 'psi_dom', 'tdot', 'k_r', 'soh_c', 'soh_n', 'efc', 'soh_anchor', 'rest_s',
+                       'soh_ratio']) x[k] = num(x[k]);
       const p = buf[buf.length - 1];
       if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
       const q = buf[buf.length - 1];         // donmuş ölçüm sayacı: ECU tutulan değerle adım atıyor mu
@@ -625,10 +645,12 @@ $('tabs').addEventListener('click', ev => {
 $('csv').addEventListener('click', () => {
   const cols = ['t_ms', 'run_id', 'state', 'cause', 'soc', 'soh', 'temp', 'ts', 't_meas', 'i_meas', 'i_allow', 'i_chg', 'psi',
                 'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h', 'psi_s', 'psi_dom', 'tdot',
-                'k_r', 'rx_at'];
+                'k_r', 'soh_c', 'soh_n', 'efc', 'rest_s', 'soh_ratio', 'rx_at'];
   const head = ['t_ms', 'run', 'state', 'cause', 'soc_pct', 'soh_pct', 'tc_est_C', 'ts_est_C', 't_meas_C', 'i_meas_A',
                 'i_allow_dis_A', 'i_allow_chg_A', 'total_derating', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec',
-                'psi_T', 'psi_C', 'psi_Tdot', 'psi_H', 'psi', 'psi_dominant', 'dTdt_C_per_min', 'k_R', 'rx_utc'];
+                'psi_T', 'psi_C', 'psi_Tdot', 'psi_H', 'psi', 'psi_dominant', 'dTdt_C_per_min', 'k_R',
+                'soh_capacity_learned_pct', 'soh_measurements', 'equivalent_full_cycles', 'rest_s', 'last_capacity_ratio_pct',
+                'rx_utc'];
   const csv = [head.join(',')].concat(buf.map(r => cols.map(c => r[c] ?? '').join(','))).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -770,8 +792,17 @@ function overview(x) {
     $('o_dv').textContent = f(1000 * (x.v_max - x.v_min), 0);
     $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)`;
   } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
-  $('o_soh_cap').textContent = sohR(x) == null ? (x.k_r == null ? ' ' : 'Battery health: learning (first 2 min)')
-                                               : `Battery health ~${f(sohR(x), 0)} % (from cell resistance)`;
+  // akü sağlığı (kapasite SOH'u, ECU flash'ında kalıcı): D satırının soh'u = gösterilen değer
+  $('o_soh').textContent = f(x.soh, 0);
+  $('o_perf').textContent = x.k_r == null || x.t_ms < KR_FREEZE_MS ? 'Peak performance: —'
+    : x.k_r < KR_PERF ? 'Peak performance: normal'
+    : `Peak performance: reduced (internal resistance ×${f(x.k_r, 2)}, power limit lowered)`;
+  $('o_cyc').textContent = x.efc == null ? 'Cycle count: — (needs wide telemetry)' : `Cycle count: ${f(x.efc, 1)} equivalent full cycles`;
+  $('o_learn').textContent = x.soh_n == null ? ' '
+    : x.rest_s > 0 && x.rest_s < REST_S ? `Resting ${Math.floor(x.rest_s / 60)} of ${REST_S / 60} min: a capacity reading is taken at ${REST_S / 60} min`
+    : x.soh_n === 0 ? 'Not measured yet: assumed new. Learns between two rests (≥ 30 % charge difference)'
+    : `Learned from ${x.soh_n} measurement${x.soh_n > 1 ? 's' : ''}, last ${f(x.soh_ratio, 1)} % · stored in the ECU`;
+  $('o_soh_cap').textContent = ' ';
   // stres indeksi Ψ: sade dille baskın kriter; durum renkleri yalnız durum için, çubuk nötr
   // girişi kaybolan kriter varsa "stres yok" denmez: değer alt sınır, hat kopuksa hiç bilinmiyor
   const ps = x.psi_s, allUnk = s.bad.link;

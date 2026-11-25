@@ -164,4 +164,40 @@ static const float DEC_I_CHG[DEC_DS_N] = { 0.f, 1.455f, 1.455f, 3.395f, 3.395f, 
 #define BAL_T_MAX       45.0f       /* Tc_hat üstünde dengeleme yok (direnç ısısı) [°C] */
 #define BAL_FILT        0.1f        /* grup gerilimi alçak geçiren katsayısı (100 ms'de; tau ~1 s) */
 
+/* ---------------- kapasite SOH'u, park-park arası (soh_step, docs/soh_design.md; Python twin/soh_capacity.py).
+ * Dinlenmiş gerilim OCV'den kapasiteden bağımsız SOC verir; iki dinlenme arasında sayılan Ah / OCV SOC farkı
+ * = kapasite. Kalan gevşeme EKF'nin RC durumlarıyla düzeltilir (OCV = V + V1 + V2). */
+#define SOH_Q_NOM       (CELL_Q_AH * BMS_NP)  /* nominal paket kapasitesi [Ah] (58,2) */
+#define SOH_I_REST      0.5f        /* süzülmüş (I - b_I) mutlak değeri bunun altında = dinlenme [A] */
+#define SOH_I_FILT      0.02f       /* akım alçak geçiren katsayısı (100 ms'de; tau 5 s) */
+#define SOH_N_REST      12000       /* dinlenme noktası 20 dk'da alınır, ham gerilimle (gevşeme bitmiş olsun).
+                                     * SIL 30 gün: 300 s + EKF V1/V2 düzeltmesi yaşlı pakette OCV SOC'sini %0,9
+                                     * kaydırıyordu (EKF modeli uyumsuzluğu V1/V2'ye yüklüyor); 600 s ham
+                                     * gerilim %0,3 (yaşlı pakette tau2 ~230 s). 20 dk'da kalan < 0,3 mV. */
+#define SOH_N_AVG       100         /* son 10 s'nin OCV ortalaması (paket V gürültüsü 0,25 V) */
+#define SOH_DSOC_MIN    0.30f       /* kabul için en küçük |dSOC| (uçtaki %1 hata -> kapasitede <%3,4) */
+#define SOH_DSOC_W      0.8f        /* ağırlık w = min(1, |dSOC| / SOH_DSOC_W) */
+#define SOH_SLOPE_MIN   0.40f       /* uçta dOCV/dSOC >= 4 mV/% (düz bölge reddi; M50T tablosunda en düşük
+                                     * 4,9 mV/% SOC 0,90-0,95'te: %90 şarj sonu kabul; ileride daha düz kimya için) */
+/* OCV -> SOC dönüşümü için hücrenin ölçülmüş OCV tablosu (Kirkaldy vd. 2024 LG M50T GITT; twin_model.c ile aynı
+ * veri). EKF'nin 7. derece polinomu tabloya 0,45'te -3,5 mV, 0,9'da +2,9 mV uyuyor: bu hata kapasiteyi ~%2
+ * düşük gösteriyordu (SIL, 30 gün). Ticari BMS'ler de dinlenme SOC'sini karakterizasyon tablosundan okur. */
+#define SOH_OCV_N       23
+static const float SOH_OCV_SOC[SOH_OCV_N] = {
+    0.0f, 0.02f, 0.05f, 0.1f, 0.15f, 0.2f, 0.25f, 0.3f, 0.35f, 0.4f, 0.45f, 0.5f,
+    0.55f, 0.6f, 0.65f, 0.7f, 0.75f, 0.8f, 0.85f, 0.9f, 0.95f, 0.98f, 1.0f };
+static const float SOH_OCV_V[SOH_OCV_N] = {
+    2.9414f, 3.0161f, 3.1444f, 3.2871f, 3.4047f, 3.4646f, 3.5055f, 3.5621f, 3.6086f, 3.6418f,
+    3.6729f, 3.7119f, 3.7594f, 3.8136f, 3.8737f, 3.9207f, 3.9641f, 4.0162f, 4.0619f, 4.0873f,
+    4.112f, 4.1519f, 4.1845f };
+#define SOH_T_MIN       10.0f       /* uç noktalarda ölçülen sıcaklık aralığı [°C] */
+#define SOH_T_MAX       40.0f
+#define SOH_N_ANCHOR    864000      /* çapa en fazla 24 h yaşar (akım ofsetinin birikmesi) */
+#define SOH_R_MIN       0.50f       /* ölçülen kapasite / nominal kabul aralığı */
+#define SOH_R_MAX       1.10f
+#define SOH_N_MAX       5           /* kazanç k = w / (n + w), n bu sayıda doyar (unutma) */
+#define SOH_DISP_UP     0.01f       /* gösterilen SOH güncelleme başına en fazla bu kadar yükselir */
+#define SOH_AH_SAVE     1.0f        /* dinlenmede Ah toplamı bu kadar değiştiyse kayıt yazılır [Ah] */
+#define SOH_KR_SAVE     0.02f       /* ... ya da k_R bu kadar değiştiyse */
+
 #endif

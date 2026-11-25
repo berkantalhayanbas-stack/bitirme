@@ -35,8 +35,11 @@
  *       0x03 sayaçları sil   CAN/uygulama hata sayaçları (TEC/REC donanımın, dokunulmaz)
  *       0x10-0x1F            EMU komutları: yok sayılır (sayılır)
  *     Her komut UART'a tek satır sonuç yazar: "cmd 0x02 value 5000: OK ..." / "REJECTED ...".
- *   - SOH: soh_tree'nin efc ve days girdileri ECU'da henüz tutulmuyor (kalıcı bellek yok),
- *     0 verilir; T = Tc_hat, m = anlık SOC, rr = direnç kestiricisi. Bu yüzden SOH yaklaşık.
+ *       0x05 yeni paket      value = 0xA5A5 ve |I| < 1 A: öğrenilmiş SOH kaydı silinir, %100'den başlar
+ *   - SOH (docs/soh_design.md): kapasite SOH'u park-park arası öğrenilir (soh_step, bms_step'ten sonra;
+ *     PIL/SIL zinciri değişmez). Kayıt flash'ta (bsp_nvm): açılışta okunur, EKF kapasitesi ve k_R oradan
+ *     başlar; soh_step isteyince ve akım ~0 iken yazılır (sayfa silme ~22 ms). 0x202 / D satırı gösterilen
+ *     SOH'u taşır (eskiden ML ağacı; ağaç stres endeksiyle birlikte yeniden ele alınacak).
  */
 #include <math.h>
 #include <string.h>
@@ -46,6 +49,7 @@
 #include "bms_config.h"
 #include "bms_algo.h"
 #include "bms_bal.h"
+#include "bsp_nvm.h"
 #include "bms_can.h"
 #ifndef BMS_SAFETY
 #define BMS_SAFETY 0                         /* 1: IWDG + flash CRC + reset nedeni (adım 6) */
@@ -114,6 +118,15 @@ static uint32_t cells_fb(void)
     return m & 0x7FFFFu;
 }
 static const char *boot_reason = "";
+static soh_t sh;                             /* kapasite SOH'u (kalıcı kısmı sh.r, flash'ta) */
+static uint32_t n_nvm_ok, n_nvm_fail;
+_Static_assert(sizeof(soh_rec_t) == BSP_NVM_DATA, "soh_rec_t kayıt boyutu");
+
+static void soh_save(void)
+{
+    if (bsp_nvm_save(&sh.r)) { n_nvm_ok++;  sh.persist = 0u;  sh.ah_saved = sh.r.ah_total;  sh.kr_saved = sh.r.k_r; }
+    else n_nvm_fail++;                       /* persist kalır: bir sonraki dinlenmede yeniden dener */
+}
 
 /* CAN alım ara deposu: uzun bir iş (çıkış ölçümü, 20 ms) sürerken donanım FIFO'su (3 çerçeve)
  * buraya boşaltılır; ana döngü önce buradan, sonra donanımdan okur (sıra korunur). */
@@ -299,8 +312,24 @@ static void command(const can_cmd_t *q, uint32_t now_ms)
     case CAN_CMD_ECU_SET_SOC:
         if (q->value < 0 || q->value > 10000) { cmd_result(0, "set SOC: out of range 0..10000"); break; }
         bms.ekf.x[0] = (float)q->value * 1e-4f;
+        soh_reset_anchor(&sh);                        /* dış müdahale: kapasite ölçüm zinciri kırılır */
         cmd_result(1, "EKF SOC set");
         break;
+    case CAN_CMD_ECU_NEW_PACK: {
+        const uint8_t fresh = have_m1 && (now_ms - mon[R_M1].last_ok_ms) < CAN_TIMEOUT_FAULT_MS;
+        if (q->value != CAN_CMD_UNLOCK)                    cmd_result(0, "new pack: wrong unlock value");
+        else if (!fresh || fabsf(m1.I) >= CAN_CMD_RESTART_I_A) cmd_result(0, "new pack: current flowing or unknown");
+        else {
+            const float b0 = sh.b0;
+            const int ok = bsp_nvm_erase_all();
+            soh_init(&sh, 0);
+            sh.n_zero = DEC_N_ZERO;  sh.b0 = b0;      /* ofset bu açılışta zaten ölçüldü */
+            bms_set_capacity(&bms, 1.0f);
+            soh_save();
+            cmd_result(ok, ok ? "SOH record erased, capacity 100 %" : "SOH record erase failed");
+        }
+        break;
+    }
     case CAN_CMD_ECU_CLR_STATS:
         for (int m = 0; m < N_RX; m++) { mon[m].n_crc_err = 0; mon[m].n_cnt_err = 0; mon[m].n_lost = 0; }
         for (uint32_t k = 0; k < CAN_N_CELL_FRAMES; k++) {
@@ -357,6 +386,27 @@ void ecu_run(void)
     }
 #endif
     bms_init(&bms, SOC0_EKF, 1.0f, 1.0f, 0.0f, 0.0f);
+    {   /* öğrenilmiş SOH kaydı (flash): EKF kapasitesi ve k_R oradan başlar */
+        soh_rec_t rec;
+        bsp_nvm_info_t ni;
+        const int found = bsp_nvm_load(&rec, &ni);
+        soh_init(&sh, found ? &rec : 0);
+        bms_set_capacity(&bms, sh.r.soh_c);
+        bms_set_kr(&bms, sh.r.k_r);
+        put_s("soh: ");
+        if (found) {
+            kv("record #", ni.seq);  kf(" capacity ", 100.0f * sh.r.soh_c);  kf("% shown ", 100.0f * sh.r.soh_disp);
+            kv("% meas ", sh.r.n_meas);  kf(" kR ", sh.r.k_r);  kf(" Ah ", sh.r.ah_total);
+            put_s(sh.r.anchor ? " anchor yes" : " anchor no");
+        } else {
+            put_s("no record (new pack, 100 %)");
+        }
+        kv(" | slots ok ", ni.n_valid);  kv(" bad ", ni.n_bad);
+        if (ni.ecc) put_s(" ECC!");
+        if (!bsp_nvm_layout_ok()) put_s(" | IMAGE OVERLAPS NVM PAGES!");
+        put_s("\r\n");
+        soh = sh.r.soh_disp;
+    }
     memset(&out, 0, sizeof(out));
     bsp_can_init_normal();
 #if BMS_OUTPUTS
@@ -443,7 +493,20 @@ void ecu_run(void)
                 bms_step(&bms, &in, &out);
                 const uint32_t cyc = bsp_cycles() - t0;
                 if (cyc > cyc_max) cyc_max = cyc;
-                soh = soh_tree(0.0f, 0.0f, out.tc, out.soc, 0.0f, out.rr);
+                soh_step(&sh, &in, &out);
+                if (sh.event == SOH_EV_ACCEPT) bms_set_capacity(&bms, sh.r.soh_c);
+                if (sh.persist && fabsf(m1.I - sh.b0) < CAN_CMD_RESTART_I_A) soh_save();   /* yalnız akım ~0 */
+                soh = sh.r.soh_disp;
+                if (sh.event != SOH_EV_NONE) {        /* dinlenme noktası: tek satır (UART, seyrek) */
+                    static const char *const EVN[] = { "", "anchor", "ACCEPTED", "small dSOC", "out of range",
+                                                       "invalid point (T / flat OCV)" };
+                    kf("soh: rest point SOC ", 100.0f * sh.last_soc);  put_s(" % -> ");
+                    put_s(EVN[sh.event]);
+                    if (sh.event == SOH_EV_ACCEPT || sh.event == SOH_EV_RANGE) { kf(" ratio ", 100.0f * sh.last_ratio); put_s("%"); }
+                    kf(" | capacity ", 100.0f * sh.r.soh_c);  kf("% shown ", 100.0f * sh.r.soh_disp);
+                    kv("% meas ", sh.r.n_meas);  kv(" | flash ok ", n_nvm_ok);  kv(" fail ", n_nvm_fail);
+                    put_s("\r\n");
+                }
                 stepped = 1;
                 ctrl.I_allow_dis = out.dec.i_allow_dis;  ctrl.I_allow_chg = out.dec.i_allow_chg;
                 ctrl.state = out.dec.state;              ctrl.cause = (uint8_t)out.dec.cause;
@@ -508,6 +571,11 @@ void ecu_run(void)
                 for (int i = 0; i < PSI_N; i++) put_fix(out.dec.psi_i[i], 3);
                 put_fix(out.dec.psi_s, 3);  put_s(",");  put_u(out.dec.dom);
                 put_fix(out.dec.tdot, 2);  put_fix(out.kr, 3);
+                /* kapasite SOH'u (2026-11-25): öğrenilen %, ölçüm sayısı, eşdeğer tam çevrim, çapa (0/1),
+                 * dinlenme süresi [s], son ölçüm oranı % */
+                put_fix(100.0f * sh.r.soh_c, 2);  put_s(",");  put_u(sh.r.n_meas);
+                put_fix(sh.r.ah_total / (2.0f * SOH_Q_NOM), 2);  put_s(",");  put_u(sh.r.anchor);
+                put_s(",");  put_u((uint32_t)sh.n_rest / 10u);  put_fix(100.0f * sh.last_ratio, 2);
                 put_s("\r\n");
             }
 #endif
@@ -522,7 +590,9 @@ void ecu_run(void)
                 put_s(state_name(out.dec.state));
                 kf(" SOC ", 100.0f * out.soc);        kf("% Idis ", out.dec.i_allow_dis);
                 kf(" Ichg ", out.dec.i_allow_chg);    kf(" Tc ", out.tc);
-                kf(" SOH ", 100.0f * soh);            kv(" cause ", out.dec.cause);
+                kf(" SOH ", 100.0f * soh);            kv(" (n", sh.r.n_meas);
+                kv(" rest ", (uint32_t)sh.n_rest / 10u);  put_s("s)");
+                kv(" cause ", out.dec.cause);
                 kv(" Tv", out.t_valid);               kv(" Iv", out.i_valid);
                 kv(" | step ", cyc_max / (BSP_CPU_HZ / 1000000u)); put_s("us");
             } else {

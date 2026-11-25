@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS telemetry (
   v_min REAL, v_max REAL,                            -- 0x102: en düşük / en yüksek grup gerilimi
   psi_t REAL, psi_c REAL, psi_tdot REAL, psi_h REAL, -- stres alt indeksleri: çekirdek T, soğutma, dT/dt, direnç (k_R)
   psi_s REAL, psi_dom INTEGER,                       -- çok kriterli stres indeksi Ψ, baskın kriter (0 yok, 1 T, 2 C, 3 Tdot, 4 H)
-  tdot REAL, k_r REAL                                -- süzülmüş yüzey dT/dt (°C/dk), EKF R0 ölçeği
+  tdot REAL, k_r REAL,                               -- süzülmüş yüzey dT/dt (°C/dk), EKF R0 ölçeği
+  soh_c REAL, soh_n INTEGER, efc REAL,               -- kapasite SOH'u: öğrenilen %, ölçüm sayısı, eşdeğer tam çevrim
+  soh_anchor INTEGER, rest_s INTEGER, soh_ratio REAL -- çapa var mı, dinlenme süresi [s], son ölçüm oranı %
 );
 CREATE INDEX IF NOT EXISTS telemetry_run ON telemetry (run_id, t_ms);
 

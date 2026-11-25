@@ -120,5 +120,38 @@ typedef struct {
 } bms_t;
 void bms_init(bms_t *b, float soc0_ekf, float q_scale, float r_scale, float rint_num0, float rint_den0);
 void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *out);
+/* öğrenilmiş değerler (kalıcı kayıt / kapasite SOH'u) EKF'ye: kapasite = soh x nominal, R0 ölçeği */
+void bms_set_capacity(bms_t *b, float soh);
+void bms_set_kr(bms_t *b, float k_r);
+
+/* ------------------------------------------------------------ kapasite SOH'u (park-park arası)
+ * bms_step'ten sonra çağrılır (PIL/SIL zinciri değişmez); I/O yapmaz, kayıt gerekince persist = 1.
+ * Python referansı: twin/soh_capacity.py */
+enum { SOH_EV_NONE = 0, SOH_EV_ANCHOR, SOH_EV_ACCEPT, SOH_EV_SMALL, SOH_EV_RANGE, SOH_EV_POINT };
+typedef struct {            /* kalıcı kısım (flash kaydı): çapa da kalıcı, ölçüm kapatıp açmayı aşar
+                             * (park -> kontak kapalı -> sabah açılış; kapalıyken akım akmaz) */
+    float soh_c, soh_disp, k_r, ah_total;
+    float soc_a, ah_a;          /* çapa: OCV SOC'si, çapadan beri net Ah */
+    uint32_t n_meas, anchor;
+} soh_rec_t;
+typedef struct {
+    soh_rec_t r;
+    float b0;                       /* akım sensörü ofseti: açılışta (kontaktör açık) ve her dinlenme
+                                     * noktasında ölçülür. EKF'nin b_I'si sürüşte kayıyor (A7), kullanılmaz */
+    int   n_zero;                   /* açılış ofset ortalaması için örnek (DEC_N_ZERO) */
+    float i_f;                      /* süzülmüş I - b0 (işaretli; dinlenme |i_f| < SOH_I_REST) */
+    int   n_rest;                   /* dinlenme süresi [örnek] */
+    float ocv_sum, i_sum;           /* son SOH_N_AVG örneğin hücre OCV / akım toplamı */
+    int   n_anchor;                 /* çapanın bu açılıştaki yaşı [örnek] (r.anchor / r.soc_a / r.ah_a) */
+    float ah_saved, kr_saved;       /* son yazılan kayıttaki değerler */
+    uint8_t persist, event;         /* kayıt iste; son olay (SOH_EV_*) */
+    float last_ratio, last_soc;     /* son ölçülen kapasite oranı, son dinlenme SOC'si */
+} soh_t;
+void  soh_init(soh_t *s, const soh_rec_t *rec);   /* rec = 0: yeni paket (%100) */
+void  soh_reset_anchor(soh_t *s);                  /* SOC ayarlandı / dış müdahale: ölçüm zinciri kırılır */
+/* her adımda: ölçüm (I, V, T, can_ok) ve bms çıktısı (T/I geçerliliği, k_R). EKF'ye bağlı değil:
+ * dinlenme gerilimi tablodan SOC, ofset kendi ölçümü (EKF'nin kapasitesi ölçümü etkilemez) */
+void  soh_step(soh_t *s, const bms_in_t *in, const bms_out_t *o);
+float soc_from_ocv(float ocv_cell, float *slope); /* OCV tablosunun tersi; slope: dOCV/dSOC [V] */
 
 #endif
