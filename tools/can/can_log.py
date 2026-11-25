@@ -84,6 +84,31 @@ def read_port(port, dur, raw_path):
     return frames
 
 
+def write_pcapng(path, frames, t0, iface):
+    """Wireshark için pcapng: LINKTYPE_CAN_SOCKETCAN (227), çerçeve başına 16 bayt (can_id büyük
+    endian, len, 3 ayrılmış, 8 veri). EPB flags yönü taşır: R = gelen (1), T = giden (2), ECU'nun
+    gözünden; Wireshark'ta frame.packet_flags_direction. Zaman: ECU saati, 1 ms."""
+    import struct
+
+    def block(btype, body):
+        body += b"\0" * (-len(body) % 4)
+        n = 12 + len(body)
+        return struct.pack("<II", btype, n) + body + struct.pack("<I", n)
+
+    def opt(code, val):
+        return struct.pack("<HH", code, len(val)) + val + b"\0" * (-len(val) % 4)
+
+    shb = struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1) + opt(4, b"bms_ecu tools/can/can_log.py") + opt(0, b"")
+    idb = struct.pack("<HHI", 227, 0, 0) + opt(2, iface.encode()) + opt(9, b"\x06") + opt(0, b"")   # 10^-6 s
+    with open(path, "wb") as f:
+        f.write(block(0x0A0D0D0A, shb) + block(1, idb))
+        for t, dr, cid, d in frames:
+            us = (t - t0) * 1000
+            pkt = struct.pack(">IB3x", cid, len(d)) + d.ljust(8, b"\0")
+            flags = opt(2, struct.pack("<I", 1 if dr == "R" else 2)) + opt(0, b"")
+            f.write(block(6, struct.pack("<IIIII", 0, us >> 32, us & 0xFFFFFFFF, len(pkt), len(pkt)) + pkt + flags))
+
+
 def run_sil(scenario, dur, extra):
     """tools/can/can_sil.c'yi bms/common + bms/sim ile derler, koşturur, C, satırlarını döndürür."""
     import glob, shutil, subprocess, tempfile
@@ -135,6 +160,8 @@ def main():
         for t, _, cid, d in frames:
             dt = t - t0
             f.write(f"({dt // 1000}.{(dt % 1000) * 1000:06d}) {a.iface} {cid:03X}#{d.hex().upper()}\n")
+    pcap = os.path.splitext(a.out)[0] + ".pcapng"
+    write_pcapng(pcap, frames, t0, a.iface)
 
     # özet: kimlik başına sayı, periyot, CRC/sayaç, hat yükü
     names = {}                                                                     # bms.dbc "BO_ <id> <ad>:"
