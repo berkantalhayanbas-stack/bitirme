@@ -7,6 +7,7 @@
  *
  * Kütüphaneler : "mcp2515" (autowp), LiquidCrystal_I2C (Library Manager)
  * Bağlantı     : MCP2515 CS = D10, INT = D2, SPI D11/D12/D13; 500 kbit/s, kristal 8 MHz
+ *                (TW_SW_SPI = 1, sw_spi_cfg.h: MOSI D9, yazılımla SPI; tezgâh Uno'sunun D11'i hasarlı)
  *                A0 arıza şiddeti potu (yoksa varsayılan şiddet; aşağıda "Şiddet")
  *                A1 LM35 çıkışı (ortam sıcaklığı, 10 mV/°C)       yoksa: 25 °C
  *                5 senaryo butonu D3, A2, A3, D4, D5 (GND'ye basar, dahili pull-up; aşağıda)
@@ -90,7 +91,12 @@
  */
 #include <SPI.h>
 #include <Wire.h>
+#include "sw_spi_cfg.h"      /* TW_SW_SPI 1: MOSI D9, yazılımla SPI (hasarlı D11) */
+#if TW_SW_SPI
+#include "mcp2515_sw.h"
+#else
 #include <mcp2515.h>
+#endif
 #include <LiquidCrystal_I2C.h>
 extern "C" {
 #include "bms_can.h"
