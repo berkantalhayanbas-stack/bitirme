@@ -139,6 +139,9 @@ LiquidCrystal_I2C *lcd = 0;
 #define I_DIS_MAX   87.3f       /* A, 1,5C x 12 */
 #define I_REGEN_MAX 30.0f
 #define I_CHG_REQ   40.7f       /* 0,7C x 12 */
+#define SOC_EMPTY_STOP 0.05f    /* sürücü paket bu SOC altına inince durur, park eder (gerçek SOC; ECU bunu
+                                 * %3'te "boş" LIMP ile zaten kısar). Önce ikiz boş pakette saatlerce sürüyor,
+                                 * her servis/yeniden başlatma yine LIMP'e düşüyordu (2026-11-22) */
 #define F_PEDAL_MAX 1200.0f     /* N */
 #define F_BRAKE     2500.0f
 #define V_MOT_MIN   2.0f        /* m/s: güç hesabında alt sınır (duruşta da tork -> akım) */
@@ -509,6 +512,10 @@ void vehicleStep()
   const float ve  = veh_v > V_MOT_MIN ? veh_v : V_MOT_MIN;
   float F_dem = 0.0f, i_req;
 
+  if ((mode == M_PROF || mode == M_PEDAL) && tw.soc_avg < SOC_EMPTY_STOP) {   /* paket boş: sürücü durur */
+    mode = M_IDLE;
+    Serial.println(F("pack empty: driver parks (A2 short = charge)"));
+  }
   switch (mode) {
     case M_PROF: {
       const float a_ref = cycleStep();

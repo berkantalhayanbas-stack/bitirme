@@ -109,10 +109,15 @@ void ekf_step(ekf_t *e, float i_meas, float v_meas, float T_use, float *innov, u
         e->n_rej++;
         memcpy(e->x, xp, sizeof(xp));
         memcpy(e->P, Pp, sizeof(Pp));
+        e->x[0] = clampf(e->x[0], 0.0f, 1.0f);   /* SOC fiziksel aralıkta (aşağıdaki not) */
         return;
     }
     e->n_rej = 0;
     for (int r = 0; r < EKF_N; r++) e->x[r] = xp[r] + K[r] * (*innov);
+    /* SOC [0, 1]: boş pakette yeniden başlatmada (EKF %50'den başlar) gerilim OCV'nin dibinde kalır, filtre
+     * SOC'yi sıfırın altına itiyordu (kart, 2026-11-22: -%20,7; panelde ve 0x202'de görünür). Kırpma
+     * kovaryansa dokunmaz (durum kısıtı, Simon 2010 "clipping"); "boş" kararı SOC < %3'te zaten verilir */
+    e->x[0] = clampf(e->x[0], 0.0f, 1.0f);
     e->x[4] = clampf(e->x[4], EKF_KR_MIN, EKF_KR_MAX);
     /* Joseph formu: P = (I-KC) Pp (I-KC)' + R K K' */
     float IKC[EKF_N][EKF_N], T1[EKF_N][EKF_N];
