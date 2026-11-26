@@ -152,7 +152,7 @@ def parse(line: str):
             return "events", dict(t=int(p[1]), run=int(p[2]), code=p[3], detail=",".join(p[4:]))
         if p[0] == "RS" and len(p) >= 3:
             return "runs", dict(op="start", id=int(p[1]), name=",".join(p[2:]))
-        if p[0] == "DX" and len(p) in (16, 24, 30):
+        if p[0] == "DX" and len(p) in (16, 24, 30, 36):
             # soc ve T (Tc) D'de 1, DX'te 2 ondalık: DX değeri D'ninkinin yerine geçer
             d = dict(t=int(p[1]), cause=int(p[3]), soc=float(p[4]), T=float(p[5]), ts=float(p[6]),
                      i_chg=float(p[8]), psi=float(p[9]),
@@ -161,9 +161,12 @@ def parse(line: str):
             if len(p) >= 24:                # çok kriterli stres indeksi (eski ECU görüntüsünde yok: NULL)
                 d.update(psi_t=float(p[16]), psi_c=float(p[17]), psi_tdot=float(p[18]), psi_h=float(p[19]),
                          psi_s=float(p[20]), psi_dom=int(p[21]), tdot=float(p[22]), k_r=float(p[23]))
-            if len(p) == 30:                # kapasite SOH'u (2026-11-25): öğrenilen %, ölçüm, EFC, çapa, dinlenme s, son oran %
+            if len(p) >= 30:                # kapasite SOH'u (2026-11-25): öğrenilen %, ölçüm, EFC, çapa, dinlenme s, son oran %
                 d.update(soh_c=float(p[24]), soh_n=int(p[25]), efc=float(p[26]), soh_anchor=int(p[27]),
                          rest_s=int(p[28]), soh_ratio=float(p[29]))
+            if len(p) == 36:                # stres yeniden tasarımı (2026-11-26): Ψ_A, Ψ_B, Ψ_P, R_cyc, R_cal, hasar
+                d.update(psi_a=float(p[30]), psi_b=float(p[31]), psi_p=float(p[32]), r_cyc=float(p[33]),
+                         r_cal=float(p[34]), dmg=float(p[35]))
             return "dx", d
         if p[0] == "RE" and len(p) >= 3:
             return "runs", dict(op="end", id=int(p[1]), result=p[2], summary=",".join(p[3:]))

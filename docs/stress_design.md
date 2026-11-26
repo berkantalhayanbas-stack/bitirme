@@ -1,6 +1,6 @@
 # Battery stress index Ψ (redesign): design
 
-Status: draft for review (2026-11-25). It replaces the "max + κ" aggregation in `docs/stress_criteria_review.md` and in the stress-index decisions of 2026-11-21/22.
+Status: IMPLEMENTED 2026-11-26 (Python, MATLAB, C; SIL, Monte Carlo). Draft of 2026-11-25. It replaces the "max + κ" aggregation in `docs/stress_criteria_review.md` and in the stress-index decisions of 2026-11-21/22. Deviations from the draft are listed in "## 5. As implemented" at the end.
 
 ## Goal
 Ψ should behave like **the sum of all bad conditions** acting on the battery. Several mild conditions add up, a single severe one dominates, and the result never exceeds 1. It covers protection (thermal), ageing and health, and the panel shows which condition drives it.
@@ -94,3 +94,20 @@ The same pipeline as the old `soh_tree`. The old `soh_tree` is no longer called 
 - Ψ_A thresholds (1× → 8×) and the 0.3C floor are assumptions. Tune them with Monte Carlo and flag them as assumed in the thesis.
 - C-rate is not varied in the Kirkaldy cycling data; the model's C-rate dependence is only through throughput (|I|/2Q).
 - The calendar term is literature (Schmalstieg 2014, NMC) and not calibrated on M50T.
+
+## 5. As implemented (2026-11-26)
+- **Residual model:** the depth-2 residual tree splits only on temperature (its three leaves are the three temperature groups). It would make S jump by 2.3× at 22.7 °C online, so the deployed residual is the same correction, interpolated linearly between the group mean temperatures and held constant outside them. Its LOCO RMSE is 3.52 % mean and 6.68 % worst, against 3.64 / 6.77 % for the tree and 3.78 / 6.32 % for physics alone (`C:\bitirme\ml\stress_model_loco.csv`).
+- **Ψ_A has two terms, combined with OR:**
+  - **Cycle term:** R_cyc = S(T, m, dod)/S_ref · |I|/0.5C, filtered with τ = 60 s. It is the only term that limits charging, through (1 − Ψ_cyc) with a 0.3C floor.
+  - **Calendar term:** R_cal = alpha(OCV(SOC), T)/alpha(OCV(0.5), 25 °C). It starts at 2× (so 2× gives 0 and 16× gives 1) and is display only, because limiting current does not slow calendar ageing.
+  - **Half-cycle rule:** dod is the larger of the current swing and the last completed half cycle.
+- **Finding, cold charge:** the datasheet already caps charging at 0.3C below 23 °C, so the floor means Ψ_A cannot reduce cold charging further. In the data, a shallow cycle at 10 °C ages the cell *less* per EFC than a full cycle at 25 °C (S_obs 0.94–2.7 vs 2.76). Only full-depth cold cycling is worse (7.2). A 0.3C full-depth charge at 15 °C gives R_cyc 0.48, against 0.39 at 26 °C. The Kirkaldy data do not vary C-rate, so plating at high C-rate is not represented. This is a thesis limitation.
+- **Ψ_H:** the larger of the capacity-SOH term (90 → 70 %) and the k_R term (1.2 → 1.3); the 0.3 cap is removed. Display only.
+- **Ψ_B:** 50 → 150 mV, updated only when |I| < 2 A (filter τ 10 s). Display only.
+- **Cause bits:** 4096 (Ψ_A) and 8192 (Ψ_B) are informational, like 1024, and never set DERATE.
+- **Verification:**
+  - Python unit tests 23/23 (U17–U23).
+  - MATLAB = Python on 34 830 samples (max difference 2.2e-16); Simulink FMEA B1–B8 PASS.
+  - C = Python: 0 state/cause/dominant mismatches; current within 0.5 mA (float32).
+  - Closed-loop S1–S9: same states; S2 core peak 48.3 → 47.3 °C, since OR derates slightly harder than max + κ.
+  - PC Monte Carlo 1000/1000 PASS.

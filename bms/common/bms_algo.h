@@ -80,22 +80,30 @@ typedef struct {
     float t_f, tdot;                 /* süzülmüş yüzey T, artış hızı [°C/dk] */
     int   n_i0, n_te;                /* termal olay: SAFE'te akımsız örnek, koşul süresi */
     uint8_t tevt;                    /* termal olay (kilitlenir) */
+    int8_t  a_dir;                   /* Ψ_A yarım çevrim: +1 deşarj, -1 şarj, 0 henüz yok */
+    int     a_n;
+    float   a_soc_rev, a_sum, a_swing;   /* yön değişimindeki SOC, SOC toplamı, son yarım çevrimin derinliği */
+    float   r_cyc, dmg;              /* süzülmüş çevrim hızı oranı, birikimli hasar (referans EFC) */
+    uint8_t dv_on;
+    float   dv_f;                    /* Ψ_B süzgeci [V] */
 } decision_t;
-enum { PSI_T = 0, PSI_C, PSI_TDOT, PSI_H, PSI_N };   /* baskın kriter kodu = indeks + 1 (0 yok) */
+enum { PSI_T = 0, PSI_C, PSI_TDOT, PSI_H, PSI_A, PSI_B, PSI_N };   /* baskın kriter kodu = indeks + 1 (0 yok) */
 typedef struct {
     uint8_t  state;
     float    i_allow_dis, i_allow_chg, psi;   /* psi: toplam kısıtlama 1 - I_allow/I_nom (0x202) */
     uint16_t cause;
-    float    psi_i[PSI_N], psi_s, tdot;       /* stres alt indeksleri, çok kriterli Ψ, dT/dt [°C/dk] */
-    uint8_t  dom;                             /* baskın kriter: 0 yok, 1 T, 2 C, 3 Tdot, 4 H */
+    float    psi_i[PSI_N], psi_s, psi_p, tdot;  /* alt indeksler, Ψ = VEYA(hepsi), Ψ_P = VEYA(T, C, Tdot), dT/dt */
+    float    r_cyc, r_cal, dmg;               /* yaşlanma hızı oranları (çevrim, takvim), birikimli hasar */
+    uint8_t  dom;                             /* baskın kriter: 0 yok, 1 T, 2 C, 3 Tdot, 4 H, 5 A, 6 B */
 } decision_out_t;
 void decision_init(decision_t *d);
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   uint8_t T_anom, float k_R, decision_out_t *o);
+                   uint8_t T_anom, float k_R, float soh_c, decision_out_t *o);
 /* cause bitleri: 1 sıcaklık, 2 soğutma, 4/8 gerilim payı, 16 veri sayfası, 32 sensör, 64 boş,
- * 128 sert sınır, 256 termal anomali, 512 sıcaklık artış hızı, 1024 direnç artışı, 2048 termal olay
+ * 128 sert sınır, 256 termal anomali, 512 sıcaklık artış hızı, 1024 sağlık (Ψ_H), 2048 termal olay,
+ * 4096 yaşlanma hızı (Ψ_A), 8192 grup dengesizliği (Ψ_B) (1024/4096/8192 bilgi: DERATE vermez)
  * (yalnız SAFE'te: 128 | 2048) (0x201'de cause 8 bit: anomali ve artış hızı bit 1'i de kurar; direnç
  * artışının ve termal olayın 8 bitlik karşılığı yok, 0x201 SAFE'te 128 gönderir) */
 
@@ -117,6 +125,7 @@ typedef struct {
 } bms_out_t;
 typedef struct {
     ekf_t ekf; thermal_t th; tanom_t ta; diag_t diag; rint_t rint; decision_t dec;
+    float soh_c;            /* kapasite SOH'u (bms_set_capacity): Ψ_H girdisi */
 } bms_t;
 void bms_init(bms_t *b, float soc0_ekf, float q_scale, float r_scale, float rint_num0, float rint_den0);
 void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *out);

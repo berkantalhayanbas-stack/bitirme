@@ -10,7 +10,7 @@
   :root {
     --page:#f9f9f7; --card:#fcfcfb; --fg:#0b0b0b; --fg2:#52514e; --mut:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
     --ring:rgba(11,11,11,.10); --hover:#f0efec;
-    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
     --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b; --none:#c3c2b7;
   }
   @media (prefers-color-scheme: dark) {
@@ -18,7 +18,7 @@
       color-scheme:dark;
       --page:#0d0d0d; --card:#1a1a19; --fg:#f0efec; --fg2:#c3c2b7; --grid:#2c2c2a; --axis:#383835;
       --ring:rgba(255,255,255,.10); --hover:#242423;
-      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --none:#383835;
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d5668f; --s6:#1f9a1f; --none:#383835;
     }
   }
   * { box-sizing:border-box; }
@@ -280,7 +280,7 @@
   </div>
 
   <div class="card wide">
-    <h2>Stress index Ψ <small>Ψ = min(1, Ψ_max + 0.25·(ΣΨ_i − Ψ_max)); I_allow = I_datasheet·(1 − Ψ), then SOP and limp-home limits</small></h2>
+    <h2>Stress index Ψ <small>Ψ = 1 − Π(1 − Ψ_i), the combined load of all conditions; I_allow = I_datasheet·(1 − Ψ_P), Ψ_P = OR(T, cooling, rise rate); ageing rate also limits charging (≥ 0.3C); then SOP and limp-home limits</small></h2>
     <div class="grid" style="padding:0">
       <div>
         <div id="crits"></div>
@@ -336,12 +336,16 @@ const STATES = ['—', 'NORMAL', 'DERATE', 'LIMP-HOME', 'SAFE-STOP'];
 // 256 anomali, 512 sıcaklık artış hızı, 1024 direnç artışı, 2048 termal olay (SAFE'te akımsız ısınma)
 const CAUSES = [[1, 'Thermal derate'], [2, 'Cooling alarm'], [4, 'SOP discharge'], [8, 'SOP charge'], [16, 'Datasheet T limit'],
                 [32, 'Sensor fault'], [64, 'SOC empty'], [128, 'Hard limit'], [256, 'Thermal anomaly'],
-                [512, 'Temp. rise rate'], [1024, 'Resistance growth'], [2048, 'Thermal event']];
+                [512, 'Temp. rise rate'], [1024, 'Battery health'], [2048, 'Thermal event'], [4096, 'Ageing rate'],
+                [8192, 'Cell imbalance']];
 // stres indeksinin kriterleri (bms_algo.h PSI_*): alan, ad, tavan, sade dil; baskın kriter kodu = sıra + 1
 const CRIT = [['psi_t', 'Core temperature', 1.0, 'battery temperature'], ['psi_c', 'Cooling alarm', 0.3, 'a suspected cooling fault'],
-              ['psi_tdot', 'Temperature rise rate', 0.5, 'a fast temperature rise'], ['psi_h', 'Cell resistance (k_R)', 0.3, 'cell ageing (higher resistance)']];
+              ['psi_tdot', 'Temperature rise rate', 0.5, 'a fast temperature rise'], ['psi_h', 'Battery health (SOH, k_R)', 1.0, 'reduced battery health'],
+              ['psi_a', 'Ageing rate', 1.0, 'fast ageing (temperature, charge level and load)'], ['psi_b', 'Cell imbalance', 1.0, 'unequal cell groups']];
+// gücü kısan kriterler (Ψ_P); Ψ_A yalnız şarjı kısar, Ψ_H ve Ψ_B gösterge
+const LIMITS = { psi_t: 'p', psi_c: 'p', psi_tdot: 'p', psi_a: 'c' };
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const C = Object.fromEntries(['fg', 'fg2', 'mut', 'grid', 'axis', 'card', 's1', 's2', 's3', 's4',
+const C = Object.fromEntries(['fg', 'fg2', 'mut', 'grid', 'axis', 'card', 's1', 's2', 's3', 's4', 's5', 's6',
                               'good', 'warning', 'serious', 'critical', 'none'].map(k => [k, css('--' + k)]));
 const ST_COL = [C.none, C.good, C.warning, C.serious, C.critical];
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => location.reload());   // tema değişti: renkleri yeniden oku
@@ -372,7 +376,8 @@ const utc = s => Date.parse(String(s).replace(' ', 'T') + 'Z');      // sunucu z
 //  ECU: son BOOT nedeni WDG-RESET / FLASH-CRC -> kalıcı SAFE (ECU bunu da CAN_TIMEOUT diye yazar, hat sanılmasın)
 //  açılış: ilk 120 s Ψ_C (DEC_N_COOL_BLANK) ve Ψ_H (k_R yakınsaması) henüz değerlendirilmiyor
 const SIGS = [['temp', 'Temperature sensor'], ['cur', 'Current sensor'], ['link', 'Measurement link'], ['ecu', 'Controller']];
-const NEEDS = { psi_t: ['temp', 'cur', 'link'], psi_c: ['temp', 'cur', 'link'], psi_tdot: ['temp', 'link'], psi_h: ['cur', 'link'] };
+const NEEDS = { psi_t: ['temp', 'cur', 'link'], psi_c: ['temp', 'cur', 'link'], psi_tdot: ['temp', 'link'], psi_h: ['cur', 'link'],
+                psi_a: ['temp', 'cur', 'link'], psi_b: ['link'] };
 const SETTLE_MS = 120000, N_FROZEN = 10;
 let boot = null, canLost = false;          // son BOOT olayı (run 0) ve ondan sonra CAN_TIMEOUT geldi mi (alerts() günceller)
 function sight(r) {
@@ -395,7 +400,7 @@ function sight(r) {
       crit[k] = k === 'psi_t' && lost.length === 1 && lost[0] === 'temp'
         ? { k: 'est', why: 'model estimate only: no temperature reading' }
         : { k: 'unk', why: `unknown: ${lost.map(s => SIGS.find(x => x[0] === s)[1].toLowerCase()).join(', ')} lost` };
-    } else if ((k === 'psi_c' || k === 'psi_h') && r.t_ms < SETTLE_MS) {
+    } else if (['psi_c', 'psi_h', 'psi_a', 'psi_b'].includes(k) && r.t_ms < SETTLE_MS) {
       crit[k] = { k: 'wait', why: `starting up: assessed after ${SETTLE_MS / 1000} s` };
     }
   }
@@ -513,10 +518,12 @@ const ch = {
   // bilinmeyen kriter grafikte boşluk (0 çizilmez); Ψ yalnız tüm girişler geçerliyken
   psi: mk('c_psi', [['Ψ', r => r.$s?.unk ? null : r.psi_s, C.fg], ['Ψ_T', r => known(r, 'psi_t'), C.s1],
                     ['Ψ_C', r => known(r, 'psi_c'), C.s2], ['Ψ_Tdot', r => known(r, 'psi_tdot'), C.s3],
-                    ['Ψ_H', r => known(r, 'psi_h'), C.s4]], { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3]] }),
+                    ['Ψ_H', r => known(r, 'psi_h'), C.s4], ['Ψ_A', r => known(r, 'psi_a'), C.s5],
+                    ['Ψ_B', r => known(r, 'psi_b'), C.s6]],
+              { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3], [5, 3], [5, 3]] }),
 };
 function known(r, k) { return r.$s?.crit[k]?.k === 'unk' ? null : r[k]; }
-const CRIT_COL = [C.s1, C.s2, C.s3, C.s4];
+const CRIT_COL = [C.s1, C.s2, C.s3, C.s4, C.s5, C.s6];
 $('crits').innerHTML = CRIT.map(([k, name, cap], i) =>
   `<div class="crit" id="cr_${k}"><span>${name}</span><span class="tr"><i id="cb_${k}" style="background:${CRIT_COL[i]}"></i>` +
   `<u style="left:calc(${100 * cap}% - 1px)" title="cap ${cap}"></u></span><b id="cv_${k}">—</b><small class="why" id="cw_${k}"></small></div>`).join('') +
@@ -526,7 +533,7 @@ function crits(x) {
   const has = x.psi_s != null, s = x.$s;
   $('psi_note').textContent = !has ? 'Needs the ECU built with BMS_TELEMETRY=2 (stress fields).'
     : s.unk ? 'Some criteria cannot be assessed because their inputs are lost (hatched). Ψ is then a lower bound; the BMS limits power by its limp-home / safe-stop rules instead.'
-    : x.psi_dom ? `Dominant criterion: ${CRIT[x.psi_dom - 1][1]}. Thin marks show each criterion's cap; only core temperature can reach 1.`
+    : x.psi_dom ? `Dominant criterion: ${CRIT[x.psi_dom - 1][1]}. Thin marks show each criterion's cap. Only temperature, cooling and rise rate lower the power limit (Ψ_P ${f(x.psi_p, 2)}); ageing rate can slow charging; health and imbalance are for information.`
                 : 'No stress: all criteria are zero. Thin marks show each criterion\'s cap.';
   for (const [i, [k]] of CRIT.entries()) {
     const c = s.crit[k], unk = c?.k === 'unk' || c?.k === 'wait';
@@ -585,7 +592,7 @@ async function live() {
       for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
                        'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h',
                        'psi_s', 'psi_dom', 'tdot', 'k_r', 'soh_c', 'soh_n', 'efc', 'soh_anchor', 'rest_s',
-                       'soh_ratio']) x[k] = num(x[k]);
+                       'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg']) x[k] = num(x[k]);
       const p = buf[buf.length - 1];
       if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
       const q = buf[buf.length - 1];         // donmuş ölçüm sayacı: ECU tutulan değerle adım atıyor mu
@@ -645,12 +652,12 @@ $('tabs').addEventListener('click', ev => {
 $('csv').addEventListener('click', () => {
   const cols = ['t_ms', 'run_id', 'state', 'cause', 'soc', 'soh', 'temp', 'ts', 't_meas', 'i_meas', 'i_allow', 'i_chg', 'psi',
                 'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h', 'psi_s', 'psi_dom', 'tdot',
-                'k_r', 'soh_c', 'soh_n', 'efc', 'rest_s', 'soh_ratio', 'rx_at'];
+                'k_r', 'soh_c', 'soh_n', 'efc', 'rest_s', 'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg', 'rx_at'];
   const head = ['t_ms', 'run', 'state', 'cause', 'soc_pct', 'soh_pct', 'tc_est_C', 'ts_est_C', 't_meas_C', 'i_meas_A',
                 'i_allow_dis_A', 'i_allow_chg_A', 'total_derating', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec',
                 'psi_T', 'psi_C', 'psi_Tdot', 'psi_H', 'psi', 'psi_dominant', 'dTdt_C_per_min', 'k_R',
                 'soh_capacity_learned_pct', 'soh_measurements', 'equivalent_full_cycles', 'rest_s', 'last_capacity_ratio_pct',
-                'rx_utc'];
+                'psi_A', 'psi_B', 'psi_P', 'ageing_rate_cycle', 'ageing_rate_calendar', 'damage_ref_efc', 'rx_utc'];
   const csv = [head.join(',')].concat(buf.map(r => cols.map(c => r[c] ?? '').join(','))).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -819,7 +826,12 @@ function overview(x) {
     : !main ? (st >= 3 ? 'No battery stress: power is limited by a protection rule, not by stress on the cells.'
                        : 'No stress: nothing is limiting the battery.')
     : `Mainly from ${main}. ` + (st >= 3 ? 'Limp-home rules apply now.'
-                                         : `It lowers the power limit by ${f(100 * ps, 0)} %.`);
+       : (x.psi_p ?? 0) > 0 ? `It lowers the power limit by ${f(100 * x.psi_p, 0)} %.`
+       : CRIT[x.psi_dom - 1][0] === 'psi_a'
+         ? ((x.r_cal ?? 0) >= 4 && Math.abs(x.i_meas ?? 0) < 2
+            ? 'Parked hot or nearly full: the cells age faster. Tip: charge to about 80 % or park in the shade.'
+            : 'Charging may be slowed to protect the cells; driving power is not limited.')
+       : 'For information: it does not limit power.');
   $('o_sees').innerHTML = seesHtml(s, x);
 }
 

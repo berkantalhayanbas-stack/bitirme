@@ -20,7 +20,8 @@ const TELEMETRY_X = ['cause' => 'INTEGER', 'ts' => 'REAL', 'i_chg' => 'REAL', 'p
                      'psi_t' => 'REAL', 'psi_c' => 'REAL', 'psi_tdot' => 'REAL', 'psi_h' => 'REAL',
                      'psi_s' => 'REAL', 'psi_dom' => 'INTEGER', 'tdot' => 'REAL', 'k_r' => 'REAL',
                      'soh_c' => 'REAL', 'soh_n' => 'INTEGER', 'efc' => 'REAL', 'soh_anchor' => 'INTEGER',
-                     'rest_s' => 'INTEGER', 'soh_ratio' => 'REAL'];
+                     'rest_s' => 'INTEGER', 'soh_ratio' => 'REAL',
+                     'psi_a' => 'REAL', 'psi_b' => 'REAL', 'psi_p' => 'REAL', 'r_cyc' => 'REAL', 'r_cal' => 'REAL', 'dmg' => 'REAL'];
 
 function db(): PDO {
     static $pdo = null;

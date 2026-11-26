@@ -118,7 +118,7 @@ def run_sil(scenario, dur, extra):
         sys.exit("gcc not found")
     com, sim = os.path.join(ROOT, "bms", "common"), os.path.join(ROOT, "bms", "sim")
     srcs = [os.path.join(HERE, "can_sil.c"), os.path.join(sim, "twin_model.c")] + \
-           [os.path.join(com, f) for f in ("bms_algo.c", "bms_bal.c", "bms_can.c", "soh_tree.c")]
+           [os.path.join(com, f) for f in ("bms_algo.c", "bms_bal.c", "bms_can.c", "soh_tree.c", "stress_model.c")]
     exe = os.path.join(tempfile.mkdtemp(), "can_sil.exe")
     env = dict(os.environ, PATH=os.path.dirname(gcc) + os.pathsep + os.environ["PATH"])
     subprocess.run([gcc, "-O2", "-std=c99", "-I", com, "-I", sim, *srcs, "-lm", "-o", exe], check=True, env=env)

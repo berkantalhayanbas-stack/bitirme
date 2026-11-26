@@ -49,8 +49,9 @@ class Reader(threading.Thread):
                 line = line.decode(errors="replace").strip()
                 if line.startswith("DX,"):
                     p = line[3:].split(",")
-                    if len(p) != len(COLS):
+                    if len(p) < len(COLS):          # yeni alanlar sonda (24/30/36 alanlı satır): ilk alanlar yeter
                         continue
+                    p = p[:len(COLS)]
                     try:
                         v = [float(x) for x in p]
                     except ValueError:

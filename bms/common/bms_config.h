@@ -90,9 +90,10 @@ static const float OCV_POLY[OCV_POLY_N] = {
 #define DEC_T_DER_OFF   43.0f
 #define DEC_T_DER_FULL  55.0f
 #define DEC_PSI_COOL    0.3f
-/* çok kriterli stres indeksi: Ψ = min(1, Ψ_max + κ (ΣΨ_i - Ψ_max)), Ψ_i = [T C Tdot H] (2026-11-21;
- * Python twin/decision.py, MATLAB decision_logic.m). Eşikler Monte Carlo sinyal taramasına göre
- * varsayım (nominal: dT/dt en çok 2,3 °C/dk, k_R 0,89-1,10). */
+/* stres indeksi (2026-11-26, docs/stress_design.md): bütün kötü koşulların toplam yükü, olasılıksal VEYA
+ * Ψ = 1 - Π(1 - Ψ_i), Ψ_i = [T C Tdot H A B]. Deşarjı Ψ_P = VEYA(T, C, Tdot) kısar; şarjı ayrıca yaşlanma
+ * hızının çevrim payı (0,3C tabanlı); H, B ve A'nın takvim payı gösterge. Python twin/decision.py, MATLAB
+ * decision_logic.m. Eşikler varsayım (nominal: dT/dt en çok 2,3 °C/dk, k_R 0,89-1,10). */
 #define DEC_TD_A_F      0.02f       /* Ψ_Tdot: ölçülen yüzey T'nin 5 s alçak geçireni (ts/5) */
 #define DEC_TD_A_R      (1.0f / 300.0f)  /* artış hızının 30 s alçak geçireni (ts/30) */
 #define DEC_TDOT_ON     3.0f        /* [°C/dk] Ψ_Tdot başlar */
@@ -103,9 +104,23 @@ static const float OCV_POLY[OCV_POLY_N] = {
  * (ömür sonu). Önceki tam nokta 1,6 = SOH ~%55, kullanım ömrünün dışı. */
 #define DEC_KR_ON       1.2f        /* Ψ_H: EKF R0 ölçeği k_R */
 #define DEC_KR_FULL     1.3f        /* Ψ_H açılıştan DEC_N_COOL_BLANK (120 s) sonra */
-#define DEC_PSI_HEALTH  0.3f        /* Ψ_H tavanı */
+#define DEC_SOH_ON      0.90f       /* Ψ_H: kapasite SOH'u 90 -> 70 % (k_R ile büyüğü; gösterge) */
+#define DEC_SOH_FULL    0.70f
 #define DEC_KR_SOP_MAX  2.0f        /* SOP direnci R0 · clamp(k_R, 1, 2) · Arrhenius(T) */
-#define DEC_KAPPA       0.25f       /* toplama ağırlığı (0: eski max) */
+/* Ψ_A yaşlanma hızı (stress_model.h, C:\bitirme\ml\07_stress_model.py): R_cyc = S(T, m, dod)/S_ref · |I|/0,5C
+ * (yarım çevrim kuralı), R_cal = alpha(OCV(SOC), T)/alpha(OCV(0,5), 25 °C); Ψ = log2(R)/3 (1x -> 0, 8x -> 1),
+ * takvim 2x'te başlar. Şarj tabanı 0,3C. Ölçek ve taban VARSAYIM (MC ile ayarlanır). */
+#define DEC_AGE_LOG2_FULL 3.0f
+#define DEC_AGE_CAL_ONSET 2.0f
+#define DEC_AGE_I_REF   2.425f      /* 0,5C [A/hücre] */
+#define DEC_AGE_FLOOR   1.455f      /* 0,3C [A/hücre] */
+#define DEC_AGE_I_MIN   2.0f        /* [A] yön ölü bandı */
+#define DEC_AGE_A       (0.1f / 60.0f)  /* R_cyc süzgeci (tau 60 s) */
+/* Ψ_B grup dengesizliği (gösterge): V_max - V_min yalnız |I| < 2 A'da, 10 s süzgeç */
+#define DEC_BAL_I_MAX   2.0f
+#define DEC_BAL_A       0.01f
+#define DEC_IMB_ON      0.050f
+#define DEC_IMB_FULL    0.150f
 #define DEC_RU_ALARM    18.0f       /* [K/W] soğutma alarmı açılır (2 x nominal R_u) */
 #define DEC_RU_ALARM_OFF 15.0f      /* [K/W] altına inince kalkar (histerezis; kestirim eşik
                                        çevresinde yakınsarken alarm açılıp kapanıyordu) */

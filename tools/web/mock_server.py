@@ -32,7 +32,8 @@ with open(os.path.join(HERE, "server", "schema.sql"), encoding="utf-8") as fs:
 # geniş satır kolonları (config.php TELEMETRY_X ile aynı): eski tabloya ekle
 TELEMETRY_X = ["cause", "ts", "i_chg", "psi", "i_meas", "v_pack", "t_meas", "v_min", "v_max",
                "psi_t", "psi_c", "psi_tdot", "psi_h", "psi_s", "psi_dom", "tdot", "k_r",
-               "soh_c", "soh_n", "efc", "soh_anchor", "rest_s", "soh_ratio"]
+               "soh_c", "soh_n", "efc", "soh_anchor", "rest_s", "soh_ratio",
+               "psi_a", "psi_b", "psi_p", "r_cyc", "r_cal", "dmg"]
 _have = {r[1] for r in db.execute("PRAGMA table_info(telemetry)")}
 for _c in TELEMETRY_X:
     if _c not in _have:

@@ -559,7 +559,8 @@ void ecu_run(void)
 #if BMS_TELEMETRY >= 2
             /* adım 9: her adımda tek satır (~90 karakter, ~8 ms; ölçüm çifti az önce işlendiği için
              * CAN Rx FIFO'su boş). DX,ms,durum,neden,SOC%,Tc,Ts,Idis,Ichg,psi,SOH%,I,V,T,Vmin,Vmax,
-             * Psi_T,Psi_C,Psi_Tdot,Psi_H,Psi,baskın,dT/dt[°C/dk],k_R. psi = toplam kısıtlama
+             * Psi_T,Psi_C,Psi_Tdot,Psi_H,Psi,baskın,dT/dt[°C/dk],k_R,<6 SOH alanı>,Psi_A,Psi_B,Psi_P,R_cyc,R_cal,
+             * hasar (36 alan). psi = toplam kısıtlama
              * 1 - I_allow/I_nom (0x202), Psi = çok kriterli stres indeksi (CAN'da yok). Yeni alanlar
              * sonda: eski çözücüler ilk 16 alanı okumaya devam eder (~140 karakter, ~12 ms). */
             if (send_ctrl) {
@@ -568,7 +569,7 @@ void ecu_run(void)
                 put_fix(out.dec.i_allow_dis, 1);  put_fix(out.dec.i_allow_chg, 1);  put_fix(out.dec.psi, 3);
                 put_fix(100.0f * soh, 1);
                 put_fix(m1.I, 1);  put_fix(m1.V, 1);  put_fix(m1.T, 1);  put_fix(m2.V_min, 3);  put_fix(m2.V_max, 3);
-                for (int i = 0; i < PSI_N; i++) put_fix(out.dec.psi_i[i], 3);
+                for (int i = 0; i < PSI_A; i++) put_fix(out.dec.psi_i[i], 3);   /* T, C, Tdot, H (eski sıra) */
                 put_fix(out.dec.psi_s, 3);  put_s(",");  put_u(out.dec.dom);
                 put_fix(out.dec.tdot, 2);  put_fix(out.kr, 3);
                 /* kapasite SOH'u (2026-11-25): öğrenilen %, ölçüm sayısı, eşdeğer tam çevrim, çapa (0/1),
@@ -576,6 +577,11 @@ void ecu_run(void)
                 put_fix(100.0f * sh.r.soh_c, 2);  put_s(",");  put_u(sh.r.n_meas);
                 put_fix(sh.r.ah_total / (2.0f * SOH_Q_NOM), 2);  put_s(",");  put_u(sh.r.anchor);
                 put_s(",");  put_u((uint32_t)sh.n_rest / 10u);  put_fix(100.0f * sh.last_ratio, 2);
+                /* stres indeksi yeniden tasarımı (2026-11-26): Ψ_A yaşlanma hızı, Ψ_B dengesizlik, Ψ_P (deşarjı
+                 * kısan koruma payı), çevrim / takvim hızı oranı, birikimli hasar (referans EFC). Psi (alan 20)
+                 * artık altı kriterin olasılıksal VEYA'sı */
+                put_fix(out.dec.psi_i[PSI_A], 3);  put_fix(out.dec.psi_i[PSI_B], 3);  put_fix(out.dec.psi_p, 3);
+                put_fix(out.dec.r_cyc, 2);  put_fix(out.dec.r_cal, 2);  put_fix(out.dec.dmg, 4);
                 put_s("\r\n");
             }
 #endif

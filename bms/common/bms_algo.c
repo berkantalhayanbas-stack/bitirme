@@ -5,6 +5,7 @@
 #include <string.h>
 #include "bms_config.h"
 #include "bms_algo.h"
+#include "stress_model.h"
 
 static float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
 static float maxf(float a, float b) { return a > b ? a : b; }
@@ -304,6 +305,18 @@ void decision_init(decision_t *d)
     d->i0_ok = 1;
 }
 
+static float ocv_clamped(float soc)
+{   /* np.interp(soc, SOH_OCV_SOC, SOH_OCV_V): uçlarda sabit */
+    if (soc <= SOH_OCV_SOC[0]) return SOH_OCV_V[0];
+    for (int k = 0; k < SOH_OCV_N - 1; k++)
+        if (soc <= SOH_OCV_SOC[k + 1])
+            return SOH_OCV_V[k] + (soc - SOH_OCV_SOC[k]) / (SOH_OCV_SOC[k + 1] - SOH_OCV_SOC[k])
+                                  * (SOH_OCV_V[k + 1] - SOH_OCV_V[k]);
+    return SOH_OCV_V[SOH_OCV_N - 1];
+}
+
+static float or2(float a, float b) { return 1.0f - (1.0f - a) * (1.0f - b); }
+
 static uint8_t band(uint8_t f, float ratio)
 {
     if (ratio < DEC_BAND_ON) return 1;
@@ -314,7 +327,7 @@ static uint8_t band(uint8_t f, float ratio)
 void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float Tc_hat,
                    float Ts_hat, float Ru_hat, float SOC_est, float bias_est,
                    uint8_t T_valid, uint8_t I_valid, uint8_t CAN_ok, float T_meas, float T_amb,
-                   uint8_t T_anom, float k_R, decision_out_t *o)
+                   uint8_t T_anom, float k_R, float soh_c, decision_out_t *o)
 {
     const float I_nom_dis = 7.275f * BMS_NP, I_nom_chg = 3.395f * BMS_NP;
 
@@ -339,20 +352,52 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
         d->td_on = 0;  d->tdot = 0.0f;
     }
     const float psi_D = DEC_PSI_TDOT * clampf((d->tdot - DEC_TDOT_ON) / (DEC_TDOT_FULL - DEC_TDOT_ON), 0.f, 1.f);
-    /* Ψ_H yalnız gösterge (2026-11-22): psi_i'de ve neden 1024'te görünür, Ψ toplamına / baskın kritere /
-     * duruma girmez. Yaşlanmış paketin akımını SOP zaten k_R ölçekli R0 ile kısar. Açılıştan 120 s sonra
-     * (EKF k_R de 120 s donuk, EKF_N_KR_FREEZE). */
-    const float psi_H = d->n_run < DEC_N_COOL_BLANK ? 0.0f
-                      : DEC_PSI_HEALTH * clampf((k_R - DEC_KR_ON) / (DEC_KR_FULL - DEC_KR_ON), 0.f, 1.f);
-    o->psi_i[PSI_T] = psi_T;  o->psi_i[PSI_C] = psi_C;  o->psi_i[PSI_TDOT] = psi_D;  o->psi_i[PSI_H] = psi_H;
-    float pm = 0.0f, ps = 0.0f;
+    /* açılıştan sonra 120 s Ψ_H/Ψ_A/Ψ_B yok: EKF (SOC, k_R) yakınsıyor (k_R de 120 s donuk, EKF_N_KR_FREEZE) */
+    const uint8_t blank = d->n_run < DEC_N_COOL_BLANK;
+    /* Ψ_H sağlık (gösterge): kapasite SOH'u ve direnç artışının büyüğü. Yaşlanmış paketin akımını SOP
+     * zaten k_R ölçekli R0 ile kısar */
+    const float psi_H = blank ? 0.0f : maxf(clampf((DEC_SOH_ON - soh_c) / (DEC_SOH_ON - DEC_SOH_FULL), 0.f, 1.f),
+                                            clampf((k_R - DEC_KR_ON) / (DEC_KR_FULL - DEC_KR_ON), 0.f, 1.f));
+    /* Ψ_A yaşlanma hızı. Yarım çevrim: |I| > ölü bant iken yön değişince yeni yarım çevrim; m = ortalama SOC,
+     * dod = şimdiki salınım ile son tam yarım çevrimin büyüğü */
+    const float soc = clampf(SOC_est, 0.f, 1.f), i_abs = fabsf(I_meas);
+    float r_inst = 0.0f;
+    if (i_abs > DEC_AGE_I_MIN) {
+        const int8_t dr = I_meas > 0.0f ? 1 : -1;
+        if (dr != d->a_dir) {
+            if (d->a_dir != 0) d->a_swing = fabsf(soc - d->a_soc_rev);
+            d->a_dir = dr;  d->a_soc_rev = soc;  d->a_sum = 0.0f;  d->a_n = 0;
+        }
+        d->a_sum += soc;  d->a_n++;
+        const float m = d->a_sum / (float)d->a_n;
+        const float dod = clampf(maxf(fabsf(soc - d->a_soc_rev), d->a_swing), 0.f, 1.f);
+        const float s_rel = stress_S(Tc_hat, m, dod) / STRESS_S_REF;
+        r_inst = s_rel * (i_abs / BMS_NP) / DEC_AGE_I_REF;
+        d->dmg += s_rel * i_abs * BMS_TS / (2.0f * BMS_NP * CELL_Q_AH * 3600.0f);
+    }
+    d->r_cyc += DEC_AGE_A * (r_inst - d->r_cyc);
+    const float cal_ref = stress_cal_alpha(ocv_clamped(0.5f), 25.0f);
+    const float r_cal = stress_cal_alpha(ocv_clamped(soc), Tc_hat) / cal_ref;
+    const float psi_cyc = blank ? 0.0f : clampf(log2f(maxf(d->r_cyc, 1e-9f)) / DEC_AGE_LOG2_FULL, 0.f, 1.f);
+    const float psi_cal = clampf(log2f(maxf(r_cal / DEC_AGE_CAL_ONSET, 1e-9f)) / DEC_AGE_LOG2_FULL, 0.f, 1.f);
+    const float psi_A = blank ? 0.0f : or2(psi_cyc, psi_cal);
+    /* Ψ_B grup dengesizliği (gösterge): yalnız düşük akımda güncellenir (IR düşümü karışmasın) */
+    if (i_abs < DEC_BAL_I_MAX) {
+        if (d->dv_on) d->dv_f += DEC_BAL_A * ((V_max - V_min) - d->dv_f);
+        else { d->dv_f = V_max - V_min;  d->dv_on = 1; }
+    }
+    const float psi_B = (blank || !d->dv_on) ? 0.0f : clampf((d->dv_f - DEC_IMB_ON) / (DEC_IMB_FULL - DEC_IMB_ON), 0.f, 1.f);
+    o->psi_i[PSI_T] = psi_T;  o->psi_i[PSI_C] = psi_C;  o->psi_i[PSI_TDOT] = psi_D;
+    o->psi_i[PSI_H] = psi_H;  o->psi_i[PSI_A] = psi_A;  o->psi_i[PSI_B] = psi_B;
+    float pm = 0.0f, q_all = 1.0f;
     o->dom = 0;
-    for (int i = 0; i < PSI_H; i++) {       /* ilk en büyük (Python index() ile aynı); Ψ_H hariç */
-        ps += o->psi_i[i];
+    for (int i = 0; i < PSI_N; i++) {       /* ilk en büyük (Python index() ile aynı) */
+        q_all *= 1.0f - o->psi_i[i];
         if (o->psi_i[i] > pm) { pm = o->psi_i[i];  o->dom = (uint8_t)(i + 1); }
     }
-    const float psi = minf(1.0f, pm + DEC_KAPPA * (ps - pm));
-    o->psi_s = psi;  o->tdot = d->tdot;
+    const float psi = 1.0f - (1.0f - psi_T) * (1.0f - psi_C) * (1.0f - psi_D);   /* Ψ_P: deşarjı kısar */
+    o->psi_s = 1.0f - q_all;  o->psi_p = psi;  o->tdot = d->tdot;
+    o->r_cyc = d->r_cyc;  o->r_cal = r_cal;  o->dmg = d->dmg;
 
     /* ---- sert sınırlar (kilitlenir) ---- */
     d->n_lo = (V_min < DEC_V_SAFE_LO) ? d->n_lo + 1 : 0;
@@ -403,7 +448,9 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     d->f_sop_chg = band(d->f_sop_chg, qs_chg / maxf(i_ds_chg, 1e-6f));
 
     float tgt_dis = maxf(0.f, minf(i_ds_dis * (1.f - psi), sop_dis));
-    float tgt_chg = maxf(0.f, minf(i_ds_chg * (1.f - psi), sop_chg));
+    /* şarj: koruma (1 - Ψ_P) ve çevrim yaşlanması (1 - Ψ_cyc); bu pay 0,3C tabanının altına inmez */
+    const float f_age = minf(1.0f, maxf(1.0f - psi_cyc, DEC_AGE_FLOOR * BMS_NP / maxf(i_ds_chg, 1e-6f)));
+    float tgt_chg = maxf(0.f, minf(i_ds_chg * (1.f - psi) * f_age, sop_chg));
 
     /* ---- LIMP-HOME ---- */
     const uint8_t sensor_bad = !T_valid || !I_valid || fabsf(bias_est) > DEC_BIAS_MAX || d->zero_bad;
@@ -417,10 +464,10 @@ void decision_step(decision_t *d, float I_meas, float V_min, float V_max, float 
     const uint16_t cause = (psi_T > 0.f || hot_ss ? 1 : 0) | (psi_C > 0.f ? 2 : 0) | (d->f_sop_dis ? 4 : 0)
                          | (d->f_sop_chg ? 8 : 0) | (d->f_ds ? 16 : 0) | (sensor_bad ? 32 : 0)
                          | (empty ? 64 : 0) | (T_anom ? (256 | 1) : 0) | (psi_D > 0.f ? (512 | 1) : 0)
-                         | (psi_H > 0.f ? 1024 : 0);
+                         | (psi_H > 0.f ? 1024 : 0) | (psi_A > 0.f ? 4096 : 0) | (psi_B > 0.f ? 8192 : 0);
 
     /* ---- durum + histerezis ---- */
-    const uint8_t want = limp ? ST_LIMP : ((cause & ~1024u) ? ST_DERATE : ST_NORMAL);   /* 1024 bilgi */
+    const uint8_t want = limp ? ST_LIMP : ((cause & ~(1024u | 4096u | 8192u)) ? ST_DERATE : ST_NORMAL);   /* bilgi bitleri */
     if (want > d->state) {
         d->state = want;  d->n_ok = 0;
     } else if (want < d->state) {
@@ -448,6 +495,7 @@ void bms_init(bms_t *b, float soc0_ekf, float q_scale, float r_scale, float rint
     diag_init(&b->diag);
     rint_init(&b->rint, rint_num0, rint_den0);
     decision_init(&b->dec);
+    b->soh_c = 1.0f;
 }
 
 /* Çağrı sırası Python referansıyla aynı (twin/closed_loop.py):
@@ -480,10 +528,10 @@ void bms_step(bms_t *b, const bms_in_t *in, bms_out_t *o)
     o->rr = rint_step(&b->rint, in->I, in->V, o->tc, o->soc, o->i_valid);
 
     decision_step(&b->dec, in->I, in->V_min, in->V_max, o->tc, o->ts, o->ru, o->soc, o->bias,
-                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, o->kr, &o->dec);
+                  o->t_valid, o->i_valid, in->can_ok, in->T, in->T_amb, o->t_anom, o->kr, b->soh_c, &o->dec);
 }
 
-void bms_set_capacity(bms_t *b, float soh) { b->ekf.q_ah = soh * SOH_Q_NOM; }
+void bms_set_capacity(bms_t *b, float soh) { b->ekf.q_ah = soh * SOH_Q_NOM;  b->soh_c = soh; }
 void bms_set_kr(bms_t *b, float k_r) { b->ekf.x[4] = clampf(k_r, EKF_KR_MIN, EKF_KR_MAX); }
 
 /* =================================================================== kapasite SOH'u (park-park arası)

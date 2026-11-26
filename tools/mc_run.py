@@ -45,7 +45,7 @@ def run_pc():
     g = gcc()
     exe = os.path.join(ROOT, "build", "mc_sil.exe")
     env = dict(os.environ, PATH=os.path.dirname(g) + os.pathsep + os.environ["PATH"])
-    srcs = ["tools/mc/mc_sil.c", "bms/sim/mc_core.c", "bms/sim/twin_model.c", "bms/common/bms_algo.c"]
+    srcs = ["tools/mc/mc_sil.c", "bms/sim/mc_core.c", "bms/sim/twin_model.c", "bms/common/bms_algo.c", "bms/common/stress_model.c"]
     subprocess.run([g, "-O2", "-std=c99", "-Wall", "-Ibms/common", "-Ibms/sim", *srcs, "-lm", "-o", exe],
                    check=True, cwd=ROOT, env=env)
     t0 = time.time()

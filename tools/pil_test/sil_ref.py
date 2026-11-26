@@ -24,7 +24,7 @@ if not gcc:
 exe = os.path.join(ROOT, "build", "sil_ref.exe")
 os.makedirs(os.path.dirname(exe), exist_ok=True)
 com = os.path.join(ROOT, "bms", "common")
-srcs = [os.path.join(HERE, "sil_ref.c")] + [os.path.join(com, f) for f in ("bms_algo.c", "soh_tree.c")]
+srcs = [os.path.join(HERE, "sil_ref.c")] + [os.path.join(com, f) for f in ("bms_algo.c", "soh_tree.c", "stress_model.c")]
 env = dict(os.environ, PATH=os.path.dirname(gcc) + os.pathsep + os.environ["PATH"])
 subprocess.run([gcc, "-O2", "-std=c99", "-I", com, *srcs, "-lm", "-o", exe], check=True, env=env)
 for fin in sorted(glob.glob(os.path.join(HERE, "data", "*_in.csv"))):

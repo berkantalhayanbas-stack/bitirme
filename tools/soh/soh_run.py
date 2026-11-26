@@ -37,7 +37,7 @@ def build():
     g = gcc()
     exe = os.path.join(OUT, "soh_sil.exe")
     com, sim = os.path.join(ROOT, "bms", "common"), os.path.join(ROOT, "bms", "sim")
-    srcs = [os.path.join(HERE, "soh_sil.c"), os.path.join(com, "bms_algo.c"), os.path.join(com, "soh_tree.c"),
+    srcs = [os.path.join(HERE, "soh_sil.c"), os.path.join(com, "bms_algo.c"), os.path.join(com, "soh_tree.c"), os.path.join(com, "stress_model.c"),
             os.path.join(sim, "twin_model.c")]
     env = dict(os.environ, PATH=os.path.dirname(g) + os.pathsep + os.environ["PATH"])
     subprocess.run([g, "-O2", "-std=c99", "-Wall", "-I", com, "-I", sim, *srcs, "-lm", "-o", exe],
