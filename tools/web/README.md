@@ -22,6 +22,7 @@ python tools/web/gateway.py COM9 --emu COM10
 - Gateway twin_emu'nun portunu da okur: her basışta Uno `B,<olay>,<1|0>` yazar → "BUTTON" olayı; gateway ECU'nun D satırlarındaki durumu izleyip beklenen moda geçiş süresini "REACTION" olayı olarak ekler (PC saati, 0,1 s çözünürlük; NORMAL servisinde önce ECU'nun yeniden başlaması beklenir; ECU zaten o moddaysa "already in ..."). ECU senaryoyu bilmez, CAN değişmez.
 - Panel: Overview'da "Button tests" kartı (`data.php?q=tests`).
 - COM10'u açmak Uno'yu sıfırlar (~2 s susar; ECU SAFE'e düşer, NORMAL butonuyla dönülür). Klavyeden `emu <komut>` Uno'ya gider (ör. `emu k 2`). `--emu` açıkken `demo_run.py` ve Arduino IDE (yükleme, Serial Monitor) COM10'u kullanamaz: önce gateway'i kapat.
+- `--emu-init "y 88"`: Uno açılınca gönderilecek twin_emu komutları (`;` ile ayrılır). Örnek: ikizi gerçek paketin tahmini SOH'una (%88, `C:itirmeerieal_pack_age.py`) ayarlamak; COM10 her açılışta Uno'yu sıfırladığı için `y` ayarı başka türlü kaybolur.
 
 ## PC: gateway
 ```

@@ -38,7 +38,8 @@ Mod butonları (isteğe bağlı, --emu COM10): twin_emu'nun seri portu da okunur
 durumu izleyip beklenen moda geçiş süresini "REACTION" olayı olarak ekler (PC saatiyle, 0,1 s
 çözünürlük). ECU senaryoyu bilmez. COM10'u açmak Uno'yu sıfırlar (~2 s susar: ECU SAFE'e düşer,
 NORMAL butonuyla dönülür). Klavyeden "emu <komut>" Uno'ya gider (ör. emu k 2), diğerleri ECU'ya.
-demo_run.py COM10'u kullandığı için --emu ile aynı anda çalışmaz.
+demo_run.py COM10'u kullandığı için --emu ile aynı anda çalışmaz. --emu-init "y 88; v 43": Uno açılınca
+gönderilecek twin_emu komutları (ör. gerçek paket tahmini SOH %88, veri/real_pack_age.py).
 """
 import collections
 import csv
@@ -62,6 +63,11 @@ EMU_PORT = None
 if "--emu" in ARGS:                                     # gateway.py COM9 --emu COM10
     i = ARGS.index("--emu")
     EMU_PORT = ARGS[i + 1]
+    del ARGS[i:i + 2]
+EMU_INIT = []
+if "--emu-init" in ARGS:                                # --emu-init "y 88; v 43": Uno açılınca gönderilir
+    i = ARGS.index("--emu-init")                        # (COM10'u açmak Uno'yu sıfırlar, ayarlar kaybolur)
+    EMU_INIT = [c.strip() for c in ARGS[i + 1].split(";") if c.strip()]
     del ARGS[i:i + 2]
 PORT = ARGS[0] if ARGS else "COM9"
 BAUD = 115200
@@ -399,6 +405,12 @@ def main():
     emu = serial.serial_for_url(EMU_PORT, BAUD, timeout=1) if EMU_PORT else None
     if emu is not None:
         threading.Thread(target=emu_reader, args=(emu,), daemon=True).start()
+        if EMU_INIT:                                    # Uno sıfırlandı: açılış (~2 s) bitince ayarları gönder
+            time.sleep(2.5)
+            for c in EMU_INIT:
+                emu.write((c + "\n").encode())
+                time.sleep(0.1)
+            print("emu init:", "; ".join(EMU_INIT))
     fcsv = LINK_CSV.open("w", newline="", encoding="utf-8", buffering=1)
     writer = csv.writer(fcsv)
     writer.writerow(["seq", "rows", "events", "status", "rtt_ms", "age_first_ms", "age_last_ms",
