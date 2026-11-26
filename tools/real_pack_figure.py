@@ -5,7 +5,7 @@ r"""Gerçek paket ölçümü ve dijital ikizle karşılaştırma (tez): aracın 
     -> C:\bitirme\results\real_pack_cell_voltages.png (+ .pdf), real_pack_vs_twin.csv, real_pack_measurements.csv
 
 (a) 19 grup gerilimi, +-1 hane (10 mV) hata çubuğu, sağ eksende OCV tablosundan SOC (Kirkaldy 2024 M50T GITT,
-    bms_config.h SOH_OCV_* ile aynı). 3,76 / 3,78 V gruplarının sırası bilinmiyor: 1. ve 19. gruba konur.
+    bms_config.h SOH_OCV_* ile aynı). En düşük grup 17 (3,76 V), en yüksek grup 19 (3,78 V).
 (b) En düşük gruba göre fark, büyükten küçüğe: gerçek paket ile ikizin başlangıç saçılması (twin_model.c GRP
     başlangıç SOC sütunu, aynı ortalama SOC'de OCV'ye çevrilir).
 """
@@ -19,7 +19,7 @@ import numpy as np
 import thesis_style as ts
 
 # ---------------- ölçümler (multimetre DT-830D)
-V_GRP = np.array([3.76] + [3.77] * 17 + [3.78])     # 20 V kademesi, 10 mV çözünürlük [V]
+V_GRP = np.array([3.77] * 16 + [3.76, 3.77, 3.78])   # 20 V kademesi, 10 mV çözünürlük; grup 17 = 3,76, 19 = 3,78 [V]
 V_PACK = 71.9                                        # B- -> B+, 200 V kademesi [V]
 V_TAP = [3.7, 7.5, 11.3, 15.1, 18.9, 22.7, 26.5, 30.3, 34.1, 37.9, 41.8, 45.5, 49.4, 53.2, 57.0,
          60.8, 64.6, 68.5, 72.3]                    # birikimli, B-'den, 200 V kademesi [V]
@@ -58,7 +58,7 @@ ax1.errorbar(g, V_GRP, yerr=RES, fmt="o", ms=4, color=ts.BLUE, ecolor=ts.BLUE, e
              label="Measured (±1 digit)")
 ts.ref_line(ax1, y=V_GRP.min() + BAL_DV_ON)
 ax1.plot([], [], ls="--", lw=0.8, color=ts.MUTED, label="Balancing threshold (min + 10 mV)")
-ax1.set_xlabel("Series group (positions of the 3.76 / 3.78 V groups assumed)")
+ax1.set_xlabel("Series group (from B−)")
 ax1.set_ylabel("Rest voltage [V]")
 ax1.set_xticks([1, 5, 10, 15, 19])
 ax1.set_xlim(0.3, 19.7)
@@ -106,7 +106,7 @@ rows = [
                                   f"sum of groups {V_GRP.sum():.2f} V", "consistent"),
     ("Group voltage spread", f"initial SOC spread -1.0..+1.2 % = {dv_twin.max():.0f} mV",
      f"{dv_real.max():.0f} mV (3.76..3.78 V; true 10-30 mV)", "yes (same magnitude)"),
-    ("SOC from OCV", "-", f"{soc.min():.1f} / {soc[1]:.1f} / {soc.max():.1f} % (mean {soc_mean:.1f} %)", "-"),
+    ("SOC from OCV", "-", f"{soc.min():.1f} (group 17) / {soc[0]:.1f} / {soc.max():.1f} (group 19) % (mean {soc_mean:.1f} %)", "-"),
     ("OCV slope at this SOC", "-", f"{slope:.1f} mV per % SOC", "-"),
     ("Meter accuracy (20 V range)", "-", f"+-{ACC(3.77) * 1000:.0f} mV absolute, 10 mV resolution", "limits relative comparison"),
 ]
@@ -115,6 +115,6 @@ with open(os.path.join(out_dir, "real_pack_vs_twin.csv"), "w", newline="") as f:
     w.writerow(["quantity", "twin_firmware", "real_pack", "match"])
     w.writerows(rows)
 
-print(f"SOC {soc.min():.2f} / {soc[1]:.2f} / {soc.max():.2f} %, mean {soc_mean:.2f} %, slope {slope:.2f} mV/%")
+print(f"SOC {soc.min():.2f} / {soc[0]:.2f} / {soc.max():.2f} %, mean {soc_mean:.2f} %, slope {slope:.2f} mV/%")
 print(f"spread real {dv_real.max():.0f} mV, twin {dv_twin.max():.1f} mV; pack {V_PACK} V vs sum {V_GRP.sum():.2f} V")
 print("->", a.out)
