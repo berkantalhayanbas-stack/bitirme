@@ -1,14 +1,19 @@
-r"""Tezgâh tabanı (3D baskı): HIL tezgâhının modüllerini sade bir tabana yerleştirir. Yazı yok.
+r"""Tezgâh tabanı (3D baskı): HIL tezgâhı üstten görünen bir EV "skateboard" şasisi olarak. Yazı yok.
 
     python hardware/bench_plate/bench_plate.py
-    -> hardware/bench_plate/bench_plate_left.stl, bench_plate_right.stl (220 x 220 mm tablaya sığar), preview.png
+    -> hardware/bench_plate/bench_plate_left.stl (ön), bench_plate_right.stl (arka), preview.png
+       (iki parça da 220 x 220 mm tablaya sığar)
 
-Yerleşim docs/bench_wiring.md ile aynı mantık: solda ECU (Nucleo + TJA1050), ortada çıkışlar (röle, ULN2003, LED),
-sağda batarya ikizi (Uno + MCP2515, 5 buton, pot). Yalnız CAN çifti ve GND soldan sağa geçer (kanal).
-Tasarım yalnız EKLEMELİ (taban + köşe tutucular + dikmeler + kanal duvarları): dilimleyici örtüşen gövdeleri
-birleştirir, delik açmak gerekmez. İki parça yapboz kenarıyla birleşir (sıkı geçme; gerekirse yapıştırıcı).
-Modül ölçüleri tipik değer: BASKIDAN ÖNCE CETVELLE ÖLÇ ve MODULES tablosunu düzelt (ölçüler mm, dış ölçü).
-Uno R3 montaj delikleri kesin (Arduino çizimi); diğerleri köşe tutucuyla oturur (çift taraflı bant / vida yok).
+Araç önü solda (x = 0). Her modül gerçek araçta duracağı yerde:
+  burun        : LED modülü (kısa/uzun far) + ULN2003 (far sürücüsü)
+  kabin konsolu: 5 buton + pot (servis/test paneli)
+  taban ortası : batarya bölgesi (kabartma çerçeve) içinde Uno + MCP2515 = paketin dijital ikizi (EMU)
+  arka         : Nucleo (BMS ECU) + TJA1050, röle = ana kontaktör (paket -> arka motor)
+Uzun kablo kanalı (omurga) şasenin bir kenarı boyunca ECU'dan buruna gider (far sinyalleri);
+CAN çifti kısa kanaldan batarya bölgesinden ECU'ya geçer. Dört tekerlek tabanın yanına yapışık alçak bloklar.
+Tasarım yalnız EKLEMELİ (taban + köşe tutucular + dikmeler + duvarlar): dilimleyici örtüşen gövdeleri birleştirir,
+destek gerekmez. İki parça yapboz kenarıyla birleşir (sıkı geçme; gerekirse yapıştırıcı).
+Modül ölçüleri tipik değer: ölçülürse MODULES tablosunu düzelt (mm, dış ölçü). Uno R3 delikleri kesin.
 """
 import math
 import os
@@ -22,33 +27,44 @@ from matplotlib.patches import Rectangle, Circle, Polygon
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------- parametreler [mm]
-W, H = 290.0, 165.0          # toplam taban
+W, H = 300.0, 150.0          # şase tabanı (uzunluk x genişlik)
 T = 3.0                      # taban kalınlığı
-SPLIT = 145.0                # iki parçanın ayrıldığı x (her parça <= 220 mm)
+CH = 15.0                    # köşe pahları (burun / arka)
+SPLIT = 172.0                # ön/arka ayrımı (batarya bölgesi ile ECU arası; hiçbir modül üstünden geçmez)
+TEETH_Y = (70.0, 115.0)      # yapboz dişleri (bu y'lerde ayrım çizgisi yakınında parça yok)
 CLR = 0.6                    # modül çevresinde boşluk
 WALL, WALL_H, ARM = 1.8, 4.0, 9.0   # köşe tutucu: duvar kalınlığı, yüksekliği, kol uzunluğu
 RIB_H = 3.0                  # kablo kanalı duvar yüksekliği
 JIG_R = 7.0                  # yapboz dişinin yarıçapı
+# tekerlekler: dingil başına (x0, x1), tabanın iki yanında; genişlik, yükseklik, tabana bindirme
+WHEELS_X = [(15.0, 75.0), (215.0, 275.0)]
+WHEEL_W, WHEEL_H, WHEEL_OV = 20.0, 6.0, 1.5
+# batarya bölgesi: kabartma çerçeve (x0, y0, x1, y1), duvar kalınlığı, yükseklik
+PACK = (100.0, 15.0, 170.0, 147.0)
+PACK_WALL, PACK_H = 1.6, 1.5
 
-# modül: ad -> (x, y sol alt köşe, genişlik, derinlik); ölçüler TİPİK, ölç ve düzelt
+# modül: ad -> (x, y sol alt köşe, genişlik (x), derinlik (y)); ölçüler TİPİK
 MODULES = {
-    "Nucleo-G431RB": (10, 55, 70.0, 82.5),     # NUCLEO-64: 70 x 82,5 mm; USB üst kenara bakar
-    "TJA1050":       (88, 140, 22.0, 12.0),    # küçük CAN transceiver modülü (ECU tarafı)
-    "Relay 1ch":     (88, 82, 26.0, 50.0),     # 5 V tek röle modülü
-    "ULN2003":       (88, 25, 32.0, 35.0),     # sürücü kartı
-    "LED module":    (122, 70, 20.0, 60.0),    # far LED'leri (8 LED çubuğu / küçük delikli kart)
-    "MCP2515":       (165, 128, 44.0, 28.0),   # MCP2515 + TJA1050 modülü (ikiz tarafı), CAN ucu sola bakar
-    "Arduino Uno":   (165, 62, 68.6, 53.3),    # Uno R3; USB sağ kenara bakar
-    "Pot":           (225, 130, 24.0, 24.0),   # arıza şiddeti potu (küçük kart); Uno'nun USB fişinin önünde değil
-    "Buttons x5":    (165, 15, 90.0, 22.0),    # 5 buton (12 mm tactile, delikli kart üstünde)
+    "LED module":    (6, 45, 20.0, 60.0),      # far LED'leri (burun)
+    "ULN2003":       (32, 57, 32.0, 35.0),     # far sürücüsü
+    "Buttons x5":    (72, 26, 22.0, 90.0),     # 5 mod butonu, konsol boyunca (kart 90 x 22, dik konur)
+    "Pot":           (72, 122, 24.0, 24.0),    # arıza şiddeti potu
+    "MCP2515":       (108, 20, 44.0, 28.0),    # MCP2515 + TJA1050 (ikiz tarafı), CAN ucu sağa (ECU'ya) bakar
+    "Arduino Uno":   (108, 70, 53.3, 68.6),    # Uno R3, 90° döndürülmüş: USB şase yan kenarına (+y) bakar
+    "TJA1050":       (185, 30, 22.0, 12.0),    # CAN transceiver (ECU tarafı)
+    "Nucleo-G431RB": (205, 55, 70.0, 82.5),    # BMS ECU; USB yan kenara (+y) bakar
+    "Relay 1ch":     (225, 18, 50.0, 26.0),    # ana kontaktör (5 V röle modülü, yatık)
 }
-# Uno R3 montaj delikleri, kartın sol alt köşesine göre (Arduino referans çizimi; USB sol kenarda)
+# alttan pimi çıkan kartın tutucusu daha yüksek (Nucleo'nun morpho pimleri alttan ~7 mm; kart pimlerin üstünde durur)
+HOLDER_H = {"Nucleo-G431RB": 11.0}
+# Uno R3 montaj delikleri, kartın sol alt köşesine göre (Arduino referans çizimi; USB sol kenarda, kart 68,6 x 53,3)
 UNO_HOLES = [(14.0, 2.5), (15.3, 50.7), (66.1, 7.6), (66.1, 35.5)]
+UNO_L = 68.6
 POST_D, POST_HOLE, POST_H = 6.0, 2.6, 5.0      # dikme dış çap, M3 kendinden kılavuzlu vida deliği, yükseklik
-# kablo kanalları: (x0, y0, x1, y1) iki paralel duvar, aralık KAN_W
+# kablo kanalları: başlangıç -> bitiş (yatay), iki paralel duvar, aralık KAN_W
 KAN_W = 8.0
-CHANNELS = [((113, 146), (162, 146)),          # CAN çifti + GND: TJA1050 -> MCP2515
-            ((60, 45), (86, 45))]              # Nucleo -> çıkışlar (röle, ULN2003)
+CHANNELS = [((30, 8), (215, 8)),               # omurga: ECU -> burun (far sinyalleri)
+            ((154, 36), (183, 36))]            # CAN çifti + GND: MCP2515 -> TJA1050
 
 # ---------------------------------------------------------------- STL yardımcıları
 tris = {"left": [], "right": []}
@@ -133,11 +149,10 @@ def write_stl(path, tl):
 
 # ---------------------------------------------------------------- yapboz kenarı (x = SPLIT, iki diş)
 def jig_edge(n_seg=16):
-    """Aşağıdan yukarıya ayrım çizgisi: düz, diş (sağa doğru), düz, diş, düz."""
+    """Aşağıdan yukarıya ayrım çizgisi: düz, diş (ön parçadan arkaya doğru), düz, diş, düz."""
     pts = [(SPLIT, 0.0)]
-    for yc in (H * 0.3, H * 0.7):
+    for yc in TEETH_Y:
         pts.append((SPLIT, yc - JIG_R * 0.6))
-        # boyun + yuvarlak baş: sola parçadan sağa çıkıntı
         for k in range(n_seg + 1):
             a = math.pi * (-0.75 + 1.5 * k / n_seg)
             pts.append((SPLIT + JIG_R * 0.9 + JIG_R * math.cos(a), yc + JIG_R * math.sin(a)))
@@ -147,9 +162,9 @@ def jig_edge(n_seg=16):
 
 
 edge = jig_edge()
-GAP = 0.25                                   # geçme boşluğu: sağ parçanın kenarı x'te biraz geri
-left_poly = [(0.0, 0.0)] + edge + [(0.0, H)]
-right_poly = [(x + GAP, y) for x, y in edge] + [(W, H), (W, 0.0)]
+GAP = 0.25                                   # geçme boşluğu: arka parçanın kenarı x'te biraz geri
+left_poly = [(CH, 0.0)] + edge + [(CH, H), (0.0, H - CH), (0.0, CH)]
+right_poly = [(x + GAP, y) for x, y in edge] + [(W - CH, H), (W, H - CH), (W, CH), (W - CH, 0.0)]
 prism("left", left_poly, 0.0, T)
 prism("right", right_poly, 0.0, T)
 
@@ -162,7 +177,7 @@ def part_of(x):
 def corners(name, x, y, w, d):
     x0, y0, x1, y1 = x - CLR, y - CLR, x + w + CLR, y + d + CLR
     p = part_of((x0 + x1) / 2)
-    z0, z1 = T, T + WALL_H
+    z0, z1 = T, T + HOLDER_H.get(name, WALL_H)
     for cx, cy, sx, sy in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x1, y1, -1, -1), (x0, y1, 1, -1)):
         # yatay kol
         xa, xb = sorted((cx - sx * WALL, cx + sx * ARM)); ya, yb = sorted((cy - sy * WALL, cy))
@@ -175,12 +190,25 @@ def corners(name, x, y, w, d):
 for name, (x, y, w, d) in MODULES.items():
     corners(name, x, y, w, d)
 
-# Uno dikmeleri (USB sağa bakacak biçimde 180° döndürülmüş: delikler kartın sağ üst köşesine göre ayna)
+# Uno dikmeleri (90° döndürülmüş: kart (bx, by) -> şase (ux + by, uy + UNO_L - bx); USB +y kenarında)
 ux, uy, uw, ud = MODULES["Arduino Uno"]
-for hx, hy in UNO_HOLES:
-    tube("right", ux + uw - hx, uy + ud - hy, T, T + POST_H, POST_D / 2, POST_HOLE / 2)
+POSTS = [(ux + hy, uy + UNO_L - hx) for hx, hy in UNO_HOLES]
+for px, py in POSTS:
+    tube(part_of(px), px, py, T, T + POST_H, POST_D / 2, POST_HOLE / 2)
 
-# kablo kanalları: iki paralel düşük duvar
+# tekerlekler: tabanın iki yanında, tabana WHEEL_OV bindirerek (tabanla tek gövde basılır)
+for x0, x1 in WHEELS_X:
+    p_ = part_of((x0 + x1) / 2)
+    box(p_, x0, -WHEEL_W, 0.0, x1, WHEEL_OV, WHEEL_H)
+    box(p_, x0, H - WHEEL_OV, 0.0, x1, H + WHEEL_W, WHEEL_H)
+
+# batarya bölgesi çerçevesi
+bx0, by0, bx1, by1 = PACK
+for r in ((bx0, by0, bx1, by0 + PACK_WALL), (bx0, by1 - PACK_WALL, bx1, by1),
+          (bx0, by0, bx0 + PACK_WALL, by1), (bx1 - PACK_WALL, by0, bx1, by1)):
+    box(part_of((r[0] + r[2]) / 2), r[0], r[1], T, r[2], r[3], T + PACK_H)
+
+# kablo kanalları: iki paralel düşük duvar (ayrım çizgisinde 3 mm boşluk)
 for (xa, ya), (xb, yb) in CHANNELS:
     for off in (-KAN_W / 2, KAN_W / 2):
         y = ya + off
@@ -192,21 +220,30 @@ for p_ in ("left", "right"):
     write_stl(os.path.join(HERE, f"bench_plate_{p_}.stl"), tris[p_])
 
 # ---------------------------------------------------------------- önizleme (üstten)
-fig, ax = plt.subplots(figsize=(9, 5.6))
+fig, ax = plt.subplots(figsize=(9.5, 6.2))
+for x0, x1 in WHEELS_X:
+    for y0 in (-WHEEL_W, H - WHEEL_OV):
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, WHEEL_W + WHEEL_OV, fc="#3b3a37", ec="#3b3a37"))
 ax.add_patch(Polygon(left_poly, closed=True, fc="#e9e8e2", ec="#52514e", lw=1))
 ax.add_patch(Polygon(right_poly, closed=True, fc="#e1e0d9", ec="#52514e", lw=1))
+ax.add_patch(Rectangle((bx0, by0), bx1 - bx0, by1 - by0, fc="#fbe7c6", ec="#c98a1b", lw=1.4, alpha=0.7))
+ax.text(bx0 + 3, by1 - 3, "battery zone", fontsize=7, color="#8a5a00", va="top")
 for name, (x, y, w, d) in MODULES.items():
     ax.add_patch(Rectangle((x, y), w, d, fc="#cde2fb", ec="#2a78d6", lw=1))
-    ax.text(x + w / 2, y + d / 2, f"{name}\n{w:g} x {d:g}", ha="center", va="center", fontsize=7)
-for hx, hy in UNO_HOLES:
-    ax.add_patch(Circle((ux + uw - hx, uy + ud - hy), POST_D / 2, fc="#52514e"))
+    ax.text(x + w / 2, y + d / 2, f"{name}\n{w:g} x {d:g}", ha="center", va="center", fontsize=6.5,
+            rotation=90 if d > 2.2 * w else 0)
+for px, py in POSTS:
+    ax.add_patch(Circle((px, py), POST_D / 2, fc="#52514e"))
 for (xa, ya), (xb, yb) in CHANNELS:
     ax.add_patch(Rectangle((xa, ya - KAN_W / 2), xb - xa, KAN_W, fc="none", ec="#eb6834", ls="--", lw=1))
-ax.annotate("USB", (MODULES["Nucleo-G431RB"][0] + 35, MODULES["Nucleo-G431RB"][1] + 82.5), xytext=(0, 6),
-            textcoords="offset points", ha="center", fontsize=7)
-ax.annotate("USB", (ux + uw, uy + ud / 2), xytext=(8, 0), textcoords="offset points", va="center", fontsize=7)
-ax.set_xlim(-5, W + 10); ax.set_ylim(-5, H + 10); ax.set_aspect("equal")
-ax.set_title(f"Bench plate {W:g} x {H:g} mm, two parts (split at x = {SPLIT:g}); dashed = cable channels", fontsize=9)
+nx, ny, nw, nd = MODULES["Nucleo-G431RB"]
+ax.annotate("USB", (nx + nw / 2, ny + nd), xytext=(0, 3), textcoords="offset points", ha="center", fontsize=7)
+ax.annotate("USB", (ux + 38, uy + ud), xytext=(0, 3), textcoords="offset points", ha="center", fontsize=7)
+ax.text(-4, H / 2, "front", ha="right", va="center", fontsize=8, rotation=90)
+ax.text(W + 4, H / 2, "rear", ha="left", va="center", fontsize=8, rotation=90)
+ax.set_xlim(-14, W + 14); ax.set_ylim(-WHEEL_W - 5, H + WHEEL_W + 5); ax.set_aspect("equal")
+ax.set_title(f"Bench chassis {W:g} x {H:g} mm (+ wheels), two parts split at x = {SPLIT:g}; "
+             "dashed = cable channels", fontsize=9)
 ax.set_xlabel("mm"); ax.grid(alpha=0.3)
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "preview.png"), dpi=150)

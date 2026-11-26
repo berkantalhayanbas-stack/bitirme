@@ -1,17 +1,29 @@
-# Bench plate (3D print)
+# Bench chassis (3D print)
 
-Plain base plate for the HIL bench: one plate, two parts joined by a jigsaw edge, each part fits a 220 x 220 mm bed.
-Layout follows `docs/bench_wiring.md`: ECU on the left, outputs in the middle, battery twin on the right; only the CAN pair and GND cross (cable channel).
+The HIL bench as a top view of an EV "skateboard" chassis: every module sits where it would sit in a real car.
+Front is on the left. No text on the part; the shapes tell the story.
+
+| Zone | Modules | Role |
+|---|---|---|
+| Nose | LED module, ULN2003 | low/high beam and its driver |
+| Cabin console | 5 buttons, pot | service/test panel (mode buttons, fault severity) |
+| Battery zone (raised frame) | Arduino Uno, MCP2515 | digital twin of the 19S12P pack (cell monitoring, EMU) |
+| Rear | Nucleo-G431RB, TJA1050, relay | BMS ECU and main contactor (pack -> rear motor) |
+
+A long cable channel (spine) runs along one side from the ECU to the nose (headlight signals); the CAN pair crosses
+from the battery zone to the ECU in a short channel. Four low wheel blocks are fused to the sides.
 
 | File | What |
 |---|---|
 | `bench_plate.py` | generator (all sizes at the top, in mm) |
-| `bench_plate_left.stl`, `bench_plate_right.stl` | print files (3 mm plate, 4 mm corner holders, Uno posts) |
+| `bench_plate_left.stl` | front part, 185 x 190 mm incl. wheels |
+| `bench_plate_right.stl` | rear part, 128 x 190 mm incl. wheels |
 | `preview.png` | top view with module footprints |
 
-Before printing:
-1. Measure each module (outer size) with a ruler and correct `MODULES` in `bench_plate.py`. Only the Arduino Uno R3 hole positions are exact; the other modules sit between corner holders (double-sided tape).
-2. Run `python hardware/bench_plate/bench_plate.py` again and check `preview.png`.
+Module sizes are typical values; only the Arduino Uno R3 hole positions are exact. If a module differs,
+correct `MODULES` in `bench_plate.py`, run `python hardware/bench_plate/bench_plate.py` and check `preview.png`.
+The Nucleo holders are 11 mm tall because the board stands on its bottom morpho pins.
 
-Print: PLA, 0.2 mm layers, 2-3 walls, 15-20 % infill, no supports. The Uno posts take M3 self-tapping screws (2.6 mm pilot).
+Print: PLA, 0.2 mm layers, 2-3 walls, 15-20 % infill, no supports, flat side down. The Uno posts take M3
+self-tapping screws (2.6 mm pilot); the other modules sit between corner holders (double-sided tape).
 The jigsaw joint is a snug fit (0.25 mm gap); glue it if it is loose.
