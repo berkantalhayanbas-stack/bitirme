@@ -74,6 +74,30 @@
   .toolbar { display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; padding:0 16px 12px; }
   .muted { color:var(--mut); font-weight:400; }
 
+  /* ---- Overview: araç gösterge ekranı (sol batarya, orta hız, sağ güç; altta dört kart) */
+  .cluster { display:grid; grid-template-columns:1fr 1.15fr 1fr; gap:10px; align-items:center; padding:18px 18px 14px;
+             background:var(--card); border:1px solid var(--ring); border-radius:16px; }
+  @media (max-width:760px) { .cluster { grid-template-columns:1fr 1fr; } .cluster .mid { grid-column:1/-1; order:-1; } }
+  .gauge { position:relative; width:100%; max-width:250px; margin:0 auto; aspect-ratio:1; }
+  .gauge svg { width:100%; height:100%; display:block; }
+  .gauge .trk { fill:none; stroke:var(--grid); stroke-width:14; stroke-linecap:round; }
+  .gauge .val { fill:none; stroke:var(--s1); stroke-width:14; stroke-linecap:round; transition:d .5s; }
+  .gauge .val.chg { stroke:var(--s3); }
+  .gauge .lim { stroke:var(--fg); stroke-width:3; stroke-linecap:round; }
+  .gauge .zero { stroke:var(--fg2); stroke-width:2; }
+  .gin { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .gbig { font-size:clamp(30px,5.2vw,50px); font-weight:650; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+  .gbig small { font-size:15px; font-weight:500; color:var(--fg2); margin-left:3px; letter-spacing:0; }
+  .glab { font-size:12px; color:var(--fg2); margin-top:2px; letter-spacing:.06em; text-transform:uppercase; }
+  .gsub { font-size:13px; color:var(--fg2); margin-top:8px; font-variant-numeric:tabular-nums; }
+  .mid { text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .ready { font-size:12px; font-weight:700; letter-spacing:.14em; padding:4px 12px; border-radius:999px; border:1.5px solid var(--none);
+           color:var(--fg2); }
+  .ready.s1 { border-color:var(--good); color:var(--good); } .ready.s2 { border-color:var(--warning); color:var(--fg); }
+  .ready.s3 { border-color:var(--serious); color:var(--serious); } .ready.s4 { border-color:var(--critical); color:var(--critical); }
+  .speed { font-size:clamp(64px,11vw,112px); font-weight:600; line-height:.95; font-variant-numeric:tabular-nums; letter-spacing:-2px; }
+  .speed small { display:block; font-size:15px; font-weight:500; color:var(--fg2); letter-spacing:.02em; margin-top:4px; }
+  .mid .cap { margin:2px 0 0; }
   /* ---- Overview: büyük, az, okunur */
   #ov { max-width:1100px; margin:0 auto; padding:0 16px 24px; display:grid; gap:14px; }
   .banner { display:flex; gap:14px; align-items:center; padding:16px 18px; border-radius:12px; background:var(--card);
@@ -157,30 +181,32 @@
   <span id="fresh"><i class="live"></i>connecting…</span>
   <span class="spacer"></span>
   <nav class="tabs" id="tabs">
-    <button data-v="ov" aria-selected="true">Overview</button><button data-v="eng" aria-selected="false">Engineering</button>
+    <button data-v="ov" aria-selected="true">Overview</button><button data-v="eng" aria-selected="false">Technical details</button>
   </nav>
 </header>
 
-<!-- sürücü görünümü: araç gösterge ekranı gibi az ve büyük; ayrıntı Engineering sekmesinde -->
+<!-- sürücü görünümü: araç gösterge ekranı gibi az ve büyük; bütün grafikler Technical details sekmesinde -->
 <main id="ov">
+  <section class="cluster" aria-label="Driver display">
+    <div class="gauge" title="Battery charge and estimated range">
+      <svg viewBox="0 0 200 200" aria-hidden="true"><path class="trk" id="g_soc_trk"/><path class="val" id="g_soc"/></svg>
+      <div class="gin"><span class="glab">Battery</span><span class="gbig"><span id="o_soc">—</span><small>%</small></span>
+        <span class="gsub" id="o_range">— km</span></div>
+    </div>
+    <div class="mid">
+      <span class="ready" id="o_ready">—</span>
+      <div class="speed"><span id="o_spd">—</span><small>km/h</small></div>
+      <p class="cap" id="o_soc_cap">&nbsp;</p>
+    </div>
+    <div class="gauge" title="Battery power: drive to the right, charge / regeneration to the left; thick marks = limits set by the BMS">
+      <svg viewBox="0 0 200 200" aria-hidden="true"><path class="trk" id="g_pw_trk"/><path class="val" id="g_pw"/>
+        <line class="zero" id="g_pw_zero"/><line class="lim" id="g_pw_lim_d"/><line class="lim" id="g_pw_lim_c"/></svg>
+      <div class="gin"><span class="glab" id="o_pw_h">Power</span><span class="gbig"><span id="o_pw">—</span><small>kW</small></span>
+        <span class="gsub" id="o_pw_cap">&nbsp;</span></div>
+    </div>
+  </section>
   <div class="banner" id="banner"><span class="ico" id="b_ico">·</span><div><b id="b_title">Waiting for data</b><span id="b_text"></span></div></div>
   <div class="ovgrid">
-    <section class="tile">
-      <h3>Charge</h3>
-      <div class="big"><span id="o_soc">—</span><small>%</small></div>
-      <div class="batt" aria-hidden="true"><div id="o_socbar"></div></div>
-      <p class="cap" id="o_soc_cap">&nbsp;</p>
-    </section>
-    <section class="tile">
-      <h3 id="o_pw_h">Power</h3>
-      <div class="big"><span id="o_pw">—</span><small>kW</small></div>
-      <div class="meter" aria-hidden="true">
-        <div class="side chg"><div class="av" id="o_avc"></div><div class="use" id="o_usec"></div></div>
-        <div class="side dis"><div class="av" id="o_avd"></div><div class="use" id="o_used"></div></div>
-      </div>
-      <div class="mscale"><span>◀ charge</span><span>0</span><span>drive ▶</span></div>
-      <p class="cap" id="o_pw_cap">&nbsp;</p>
-    </section>
     <section class="tile">
       <h3>Battery temperature</h3>
       <div class="big"><span id="o_t">—</span><small>°C</small></div>
@@ -188,45 +214,28 @@
       <div class="tticks" id="o_tticks"></div>
       <p class="cap" id="o_t_cap">&nbsp;</p>
     </section>
+    <!-- akü sağlığı: telefonlardaki "Pil Sağlığı" gibi; kapasite park-park arası öğrenilir, flash'ta kalıcı -->
+    <section class="tile">
+      <h3>Battery health</h3>
+      <div class="big"><span id="o_soh">—</span><small>%</small></div>
+      <p class="cap"><b>Maximum capacity</b> compared with a new pack</p>
+      <p class="cap" id="o_perf">&nbsp;</p>
+      <p class="cap" id="o_cyc">&nbsp;</p>
+      <p class="cap" id="o_learn">&nbsp;</p>
+    </section>
+    <section class="tile">
+      <h3>Battery stress</h3>
+      <div class="big"><span id="o_psi">—</span><small id="o_psi_u">%</small></div>
+      <div class="psibar" aria-hidden="true"><div id="o_psibar"></div></div>
+      <p class="cap" id="o_psi_cap">&nbsp;</p>
+    </section>
     <section class="tile">
       <h3>Cell balance</h3>
       <div class="big"><span id="o_dv">—</span><small>mV</small></div>
       <p class="cap" id="o_dv_cap">&nbsp;</p>
-      <p class="cap" id="o_soh_cap">&nbsp;</p>
     </section>
   </div>
-  <section class="tile">
-    <div class="stress">
-      <div>
-        <h3>Battery stress</h3>
-        <div class="big"><span id="o_psi">—</span><small id="o_psi_u">%</small></div>
-      </div>
-      <div>
-        <div class="psibar" aria-hidden="true"><div id="o_psibar"></div></div>
-        <p class="cap" id="o_psi_cap">&nbsp;</p>
-      </div>
-    </div>
-    <div class="sees" id="o_sees"></div>
-  </section>
-  <!-- akü sağlığı: telefonlardaki "Pil Sağlığı" gibi; kapasite park-park arası öğrenilir, flash'ta kalıcı -->
-  <section class="tile">
-    <div class="stress">
-      <div>
-        <h3>Battery health</h3>
-        <div class="big"><span id="o_soh">—</span><small>%</small></div>
-      </div>
-      <div>
-        <p class="cap"><b>Maximum capacity</b> — usable capacity compared with a new pack</p>
-        <p class="cap" id="o_perf">&nbsp;</p>
-        <p class="cap" id="o_cyc">&nbsp;</p>
-        <p class="cap" id="o_learn">&nbsp;</p>
-      </div>
-    </div>
-  </section>
-  <section class="tile">
-    <h3>Power used and available <span class="muted">· last minute</span></h3>
-    <div class="plot" style="height:200px"><canvas id="c_pow"></canvas></div>
-  </section>
+  <section class="tile"><div class="sees" id="o_sees" style="margin:0;padding:0;border:0"></div></section>
   <section class="tile">
     <h3>Button tests <span class="muted">· cause pressed on the test bench → mode the ECU chose by itself</span></h3>
     <table class="tests"><thead><tr><th>Time</th><th>Button (cause)</th><th>ECU reaction</th></tr></thead>
@@ -269,6 +278,12 @@
       <div class="kpi"><b id="k_soh">—</b><span>Capacity SOH learned / shown (%)</span></div>
       <div class="kpi"><b id="k_sohr">—</b><span>SOH from resistance (%)</span></div>
       <div class="kpi"><b id="k_can">—</b><span>CAN TEC / REC</span></div>
+      <div class="kpi"><b id="k_spd">—</b><span>Vehicle speed (km/h, from the twin)</span></div>
+      <div class="kpi"><b id="k_rng">—</b><span>Range estimate (km) / consumption (Wh/km)</span></div>
+      <div class="kpi"><b id="k_psip">—</b><span>Ψ_P power-limiting part (%)</span></div>
+      <div class="kpi"><b id="k_psiab">—</b><span>Ψ_A ageing / Ψ_B imbalance (%)</span></div>
+      <div class="kpi"><b id="k_rate">—</b><span>Ageing rate cycle / calendar (× ref.)</span></div>
+      <div class="kpi"><b id="k_dmg">—</b><span>Accumulated damage (ref. full cycles)</span></div>
     </div>
     <p class="note" id="wide_hint">Only the basic fields are arriving. Measured current, voltages and surface temperature need the ECU built with BMS_TELEMETRY=2.</p>
   </div>
@@ -295,6 +310,15 @@
   <div class="card"><h2>Temperatures (°C)</h2><div class="plot"><canvas id="c_tmp"></canvas></div></div>
   <div class="card"><h2>Group voltage, min and max (V)</h2><div class="plot"><canvas id="c_v"></canvas></div></div>
   <div class="card"><h2>State of charge (%)</h2><div class="plot"><canvas id="c_soc"></canvas></div></div>
+  <div class="card"><h2>Power: used and allowed (kW) <small>+ drive, − charge / regeneration</small></h2><div class="plot"><canvas id="c_pow"></canvas></div></div>
+  <div class="card"><h2>Vehicle speed (km/h) <small>from the digital twin (gateway --emu)</small></h2><div class="plot"><canvas id="c_spd"></canvas></div></div>
+  <div class="card"><h2>Temperature rise rate (°C/min) <small>Ψ_Tdot starts at 3, full at 10</small></h2><div class="plot"><canvas id="c_td"></canvas></div></div>
+  <div class="card"><h2>Cell group spread V_max − V_min (mV) <small>Ψ_B starts at 50, full at 150 (at |I| &lt; 2 A)</small></h2><div class="plot"><canvas id="c_dv"></canvas></div></div>
+  <div class="card"><h2>Ageing rate vs. 25 °C reference (×) <small>cycle: S(T, SOC, DoD)·|I|/0.5C; calendar: α(V, T), counted above 2×</small></h2><div class="plot"><canvas id="c_age"></canvas></div></div>
+  <div class="card"><h2>Accumulated ageing damage (reference full cycles)</h2><div class="plot"><canvas id="c_dmg"></canvas></div></div>
+  <div class="card"><h2>Internal resistance scale k_R <small>EKF estimate; Ψ_H from 1.2 to 1.3 (SOH ~80 %)</small></h2><div class="plot"><canvas id="c_kr"></canvas></div></div>
+  <div class="card"><h2>Capacity SOH (%) <small>learned between rests, stored in flash</small></h2><div class="plot"><canvas id="c_soh"></canvas></div></div>
+  <div class="card"><h2>CAN error counters <small>error passive at 128, bus-off at 256</small></h2><div class="plot"><canvas id="c_can"></canvas></div></div>
 
   <div class="card"><h2>Recent events</h2><ul class="ev" id="events"></ul></div>
   <div class="card">
@@ -406,7 +430,7 @@ function sight(r) {
   }
   return { bad, crit, unk: Object.values(crit).some(c => c.k === 'unk'), any: Object.keys(bad).length > 0 };
 }
-// "BMS neyi görebiliyor" satırı (Overview ve Engineering ortak)
+// "BMS neyi görebiliyor" satırı (Overview ve Technical details ortak)
 function seesHtml(s, r) {
   const items = SIGS.map(([k, name]) => {
     if (s.bad[k]) return `<span class="miss">${name} <small>${esc(s.bad[k])}</small></span>`;
@@ -521,6 +545,20 @@ const ch = {
                     ['Ψ_H', r => known(r, 'psi_h'), C.s4], ['Ψ_A', r => known(r, 'psi_a'), C.s5],
                     ['Ψ_B', r => known(r, 'psi_b'), C.s6]],
               { dec: 3, min: 0, max: 1, dash: [[], [5, 3], [5, 3], [5, 3], [5, 3], [5, 3], [5, 3]] }),
+  pow: mk('c_pow', [['Used', r => r.v_pack == null || r.i_meas == null ? null : r.v_pack * r.i_meas / 1000, C.s1],
+                    ['Allowed (drive)', r => r.v_pack == null ? null : r.v_pack * r.i_allow / 1000, C.s2],
+                    ['Allowed (charge)', r => r.v_pack == null || r.i_chg == null ? null : -r.v_pack * r.i_chg / 1000, C.s3]],
+            { dec: 2, dash: [[], [6, 3], [6, 3]] }),
+  spd: mk('c_spd', [['Speed', 'v_kmh', C.s1]], { min: 0 }),
+  td: mk('c_td', [['dT/dt', 'tdot', C.s1]], { dec: 2, ref: [{ v: 3, t: 'Ψ_Tdot starts' }, { v: 10, t: 'full' }] }),
+  dv: mk('c_dv', [['Spread', r => r.v_min == null ? null : 1000 * (r.v_max - r.v_min), C.s1]], { dec: 0, min: 0,
+          ref: [{ v: 50, t: 'Ψ_B starts' }, { v: 150, t: 'full' }] }),
+  age: mk('c_age', [['Cycle', 'r_cyc', C.s5], ['Calendar', 'r_cal', C.s4]], { dec: 2, min: 0,
+           ref: [{ v: 1, t: 'reference' }, { v: 2, t: 'calendar counted' }, { v: 8, t: 'Ψ_A = 1' }] }),
+  dmg: mk('c_dmg', [['Damage', 'dmg', C.s5]], { dec: 4, min: 0 }),
+  kr: mk('c_kr', [['k_R', 'k_r', C.s4]], { dec: 3, min: 0.9, max: 1.4, ref: [{ v: 1.2, t: 'Ψ_H starts' }, { v: 1.3, t: 'SOH ~80 %' }] }),
+  soh: mk('c_soh', [['Learned', 'soh_c', C.s1], ['Shown', 'soh', C.s2]], { dec: 1, min: 70, max: 100, dash: [[], [6, 3]] }),
+  can: mk('c_can', [['TEC', 'tec', C.s2], ['REC', 'rec', C.s1]], { dec: 0, min: 0, ref: [{ v: 128, t: 'error passive' }] }),
 };
 function known(r, k) { return r.$s?.crit[k]?.k === 'unk' ? null : r[k]; }
 const CRIT_COL = [C.s1, C.s2, C.s3, C.s4, C.s5, C.s6];
@@ -528,7 +566,7 @@ $('crits').innerHTML = CRIT.map(([k, name, cap], i) =>
   `<div class="crit" id="cr_${k}"><span>${name}</span><span class="tr"><i id="cb_${k}" style="background:${CRIT_COL[i]}"></i>` +
   `<u style="left:calc(${100 * cap}% - 1px)" title="cap ${cap}"></u></span><b id="cv_${k}">—</b><small class="why" id="cw_${k}"></small></div>`).join('') +
   `<div class="crit dom" id="cr_psi_s"><span>Ψ (aggregate)</span><span class="tr" id="ct_psi_s"><i id="cb_psi_s" style="background:${C.fg}"></i></span><b id="cv_psi_s">—</b><small class="why" id="cw_psi_s"></small></div>`;
-// stres çubukları (Engineering): değer 0-1, baskın kriter kalın; girişi geçersiz kriter taralı "?"
+// stres çubukları (Technical details): değer 0-1, baskın kriter kalın; girişi geçersiz kriter taralı "?"
 function crits(x) {
   const has = x.psi_s != null, s = x.$s;
   $('psi_note').textContent = !has ? 'Needs the ECU built with BMS_TELEMETRY=2 (stress fields).'
@@ -578,6 +616,13 @@ function kpis(x) {
   $('k_soh').textContent = x.soh_c == null ? f(x.soh, 1) : `${f(x.soh_c, 1)} / ${f(x.soh, 1)}`;
   $('k_sohr').textContent = sohR(x) == null ? (x.k_r == null ? '—' : 'learning') : f(sohR(x), 0);
   $('k_can').textContent = `${x.tec} / ${x.rec}`;
+  $('k_spd').textContent = f(x.v_kmh, 0);
+  const R = range(x);
+  $('k_rng').textContent = R.km == null ? '—' : `${f(R.km, 0)} / ${f(R.whkm, 0)}`;
+  $('k_psip').textContent = x.psi_p == null ? '—' : f(100 * x.psi_p, 0);
+  $('k_psiab').textContent = x.psi_a == null ? '—' : `${f(100 * x.psi_a, 0)} / ${f(100 * x.psi_b, 0)}`;
+  $('k_rate').textContent = x.r_cyc == null ? '—' : `${f(x.r_cyc, 2)} / ${f(x.r_cal, 2)}`;
+  $('k_dmg').textContent = f(x.dmg, 4);
   $('kpi_t').textContent = `run ${x.run_id}, ECU t = ${(x.t_ms / 1000).toFixed(1)} s`;
   $('state').textContent = STATES[x.state] ?? '?'; $('state').className = `badge s${x.state}`;
   const cs = causeText(x.cause);
@@ -592,7 +637,7 @@ async function live() {
       for (const k of ['t_ms', 'soc', 'soh', 'temp', 'i_allow', 'state', 'tec', 'rec', 'run_id', 'cause', 'ts', 'i_chg',
                        'psi', 'i_meas', 'v_pack', 't_meas', 'v_min', 'v_max', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h',
                        'psi_s', 'psi_dom', 'tdot', 'k_r', 'soh_c', 'soh_n', 'efc', 'soh_anchor', 'rest_s',
-                       'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg']) x[k] = num(x[k]);
+                       'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg', 'v_kmh']) x[k] = num(x[k]);
       const p = buf[buf.length - 1];
       if (p && (x.run_id !== p.run_id || x.t_ms <= p.t_ms)) buf = [];      // kaynak değişti / ECU yeniden başladı
       const q = buf[buf.length - 1];         // donmuş ölçüm sayacı: ECU tutulan değerle adım atıyor mu
@@ -645,19 +690,19 @@ $('tabs').addEventListener('click', ev => {
   const b = ev.target.closest('button'); if (!b) return;
   $('tabs').querySelectorAll('button').forEach(x => x.setAttribute('aria-selected', x === b));
   $('ov').hidden = b.dataset.v !== 'ov'; $('eng').hidden = b.dataset.v !== 'eng';
-  if (b.dataset.v === 'eng') { Object.values(ch).forEach(c => c.resize()); cRtt.resize(); } else cPow.resize();
+  if (b.dataset.v === 'eng') { Object.values(ch).forEach(c => c.resize()); cRtt.resize(); }
   draw();
   try { localStorage.setItem('bms_tab', b.dataset.v); } catch (e) {}
 });
 $('csv').addEventListener('click', () => {
   const cols = ['t_ms', 'run_id', 'state', 'cause', 'soc', 'soh', 'temp', 'ts', 't_meas', 'i_meas', 'i_allow', 'i_chg', 'psi',
                 'v_pack', 'v_min', 'v_max', 'tec', 'rec', 'psi_t', 'psi_c', 'psi_tdot', 'psi_h', 'psi_s', 'psi_dom', 'tdot',
-                'k_r', 'soh_c', 'soh_n', 'efc', 'rest_s', 'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg', 'rx_at'];
+                'k_r', 'soh_c', 'soh_n', 'efc', 'rest_s', 'soh_ratio', 'psi_a', 'psi_b', 'psi_p', 'r_cyc', 'r_cal', 'dmg', 'v_kmh', 'rx_at'];
   const head = ['t_ms', 'run', 'state', 'cause', 'soc_pct', 'soh_pct', 'tc_est_C', 'ts_est_C', 't_meas_C', 'i_meas_A',
                 'i_allow_dis_A', 'i_allow_chg_A', 'total_derating', 'v_pack_V', 'v_min_V', 'v_max_V', 'can_tec', 'can_rec',
                 'psi_T', 'psi_C', 'psi_Tdot', 'psi_H', 'psi', 'psi_dominant', 'dTdt_C_per_min', 'k_R',
                 'soh_capacity_learned_pct', 'soh_measurements', 'equivalent_full_cycles', 'rest_s', 'last_capacity_ratio_pct',
-                'psi_A', 'psi_B', 'psi_P', 'ageing_rate_cycle', 'ageing_rate_calendar', 'damage_ref_efc', 'rx_utc'];
+                'psi_A', 'psi_B', 'psi_P', 'ageing_rate_cycle', 'ageing_rate_calendar', 'damage_ref_efc', 'speed_kmh', 'rx_utc'];
   const csv = [head.join(',')].concat(buf.map(r => cols.map(c => r[c] ?? '').join(','))).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -747,6 +792,38 @@ const kw = v => Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0);
 
 $('o_tticks').innerHTML = [0, 45, 55, 60].map(t => `<span style="left:${100 * t / T_SCALE}%">${t}</span>`).join('');
 
+// gösterge yayı: 270° (sol alt 135° -> sağ alt 405°), f 0..1
+const G0 = 135, GS = 270, GR = 84, GC = 100;
+function pt(a) { const r = a * Math.PI / 180; return [GC + GR * Math.cos(r), GC + GR * Math.sin(r)]; }
+function arc(f0, f1) {
+  if (f1 < f0) [f0, f1] = [f1, f0];
+  if (f1 - f0 < 0.002) return '';
+  const a0 = G0 + GS * f0, a1 = G0 + GS * f1, [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${GR} ${GR} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function tick(el, f) {                    // yayın üstünde kısa çizgi (sınır işareti)
+  const a = (G0 + GS * f) * Math.PI / 180, r0 = GR - 12, r1 = GR + 12;
+  el.setAttribute('x1', GC + r0 * Math.cos(a)); el.setAttribute('y1', GC + r0 * Math.sin(a));
+  el.setAttribute('x2', GC + r1 * Math.cos(a)); el.setAttribute('y2', GC + r1 * Math.sin(a));
+}
+['g_soc_trk', 'g_pw_trk'].forEach(id => $(id).setAttribute('d', arc(0, 1)));
+// menzil: kullanılabilir enerji (19S x 3,6 V x 58,2 Ah x kapasite SOH) x SOC / tüketim. Tüketim son 5 dk'nın
+// sürüşünden (>= 0,3 km yol); daha azsa tipik değer. Tahmindir, ECU hesaplamaz.
+const PACK_KWH = 19 * 3.6 * 58.2 / 1000, WHKM_TYP = 45;
+function range(x) {
+  if (x.soc == null) return { km: null };
+  let e = 0, d = 0;
+  for (let k = 1; k < buf.length; k++) {
+    const a = buf[k - 1], b = buf[k], dt = (b.t_ms - a.t_ms) / 3.6e6;           // h
+    if (dt <= 0 || dt > 2 / 3600 || b.v_kmh == null || b.v_pack == null || b.i_meas == null) continue;
+    e += b.v_pack * b.i_meas * dt;  d += b.v_kmh * dt;                          // Wh, km
+  }
+  const own = d >= 0.3 && e > 0, whkm = own ? e / d : WHKM_TYP;
+  const soh = (x.soh ?? 100) / 100;
+  return { km: x.soc / 100 * PACK_KWH * soh * 1000 / whkm, whkm, own };
+}
+const READY = ['—', 'READY', 'POWER LIMITED', 'LIMP HOME', 'OFF'];
+
 function overview(x) {
   // durum: sade dille başlık + neden
   const st = x.state ?? 0;
@@ -767,24 +844,31 @@ function overview(x) {
     $('b_text').textContent = 'The battery keeps heating although it is disconnected and no current flows. ' +
                               'Stop, switch off and move away from the vehicle; call emergency services.';
   }
-  // şarj
+  const p = x.v_pack != null && x.i_meas != null ? x.v_pack * x.i_meas / 1000 : null;
+  $('o_ready').textContent = p != null && p < -0.05 && st <= 2 ? 'CHARGING' : READY[st] ?? '—';
+  $('o_ready').className = `ready s${st}`;
+  // batarya: SOC yayı + menzil tahmini
   $('o_soc').textContent = f(x.soc, 0);
-  $('o_socbar').style.width = pct(x.soc ?? 0, 100);
-  $('o_soc_cap').textContent = x.v_pack == null ? ' ' : `Pack voltage ${f(x.v_pack)} V`;
-  // güç: + sürüş, - şarj; açık şerit = izin verilen, koyu = kullanılan
-  if (x.v_pack != null && x.i_meas != null) {
-    const v = x.v_pack, p = v * x.i_meas / 1000, pd = v * (x.i_allow ?? 0) / 1000, pc = v * (x.i_chg ?? 0) / 1000;
-    const nd = v * I_NOM_DIS / 1000, nc = v * I_NOM_CHG / 1000;
+  $('g_soc').setAttribute('d', arc(0, Math.max(0, Math.min(1, (x.soc ?? 0) / 100))));
+  const R = range(x);
+  $('o_range').textContent = R.km == null ? '— km' : `≈ ${f(R.km, 0)} km range`;
+  $('o_soc_cap').textContent = x.v_pack == null ? ' ' : `Pack ${f(x.v_pack)} V · ` +
+    (R.own ? `${f(R.whkm, 0)} Wh/km recently` : `range at a typical ${WHKM_TYP} Wh/km`);
+  // hız (ikizden; ECU'da yok)
+  $('o_spd').textContent = x.v_kmh == null ? '—' : f(x.v_kmh, 0);
+  // güç yayı: sol şarj / rejeneratif, sağ sürüş; kalın çizgiler = BMS'in izin verdiği sınırlar
+  if (p != null) {
+    const v = x.v_pack, nd = v * I_NOM_DIS / 1000, nc = v * I_NOM_CHG / 1000, z = nc / (nc + nd);
+    const pd = v * (x.i_allow ?? 0) / 1000, pc = v * (x.i_chg ?? 0) / 1000;
+    const fp = Math.max(0, Math.min(1, z + p / (nc + nd)));
+    $('g_pw').setAttribute('d', arc(z, fp)); $('g_pw').classList.toggle('chg', p < 0);
+    tick($('g_pw_zero'), z); tick($('g_pw_lim_d'), Math.min(1, z + pd / (nc + nd))); tick($('g_pw_lim_c'), Math.max(0, z - pc / (nc + nd)));
     $('o_pw').textContent = kw(p);
     $('o_pw_h').textContent = p < -0.05 ? 'Charging' : 'Power';
-    $('o_avd').style.width = pct(pd, nd); $('o_used').style.width = pct(Math.max(p, 0), nd);
-    $('o_avc').style.width = pct(pc, nc); $('o_usec').style.width = pct(Math.max(-p, 0), nc);
-    $('o_pw_cap').textContent = p < -0.05 ? `Charging at ${kw(-p)} of ${kw(pc)} kW allowed`
-                                          : `${kw(pd)} kW available for driving · ` +
-                                            (pc < 0.05 ? 'charging not allowed now' : `${kw(pc)} kW for charging`);
+    $('o_pw_cap').textContent = p < -0.05 ? `${kw(pc)} kW charge allowed` : `${kw(pd)} kW available`;
   } else {
-    $('o_pw').textContent = '—';
-    $('o_pw_cap').textContent = `Allowed current ${f(x.i_allow, 0)} A (power needs wide telemetry)`;
+    $('o_pw').textContent = '—'; $('g_pw').setAttribute('d', '');
+    $('o_pw_cap').textContent = `I_allow ${f(x.i_allow, 0)} A`;
   }
   // sıcaklık: çekirdek kestirimi (ECU'nun karar verdiği değer)
   const t = x.temp;
@@ -797,7 +881,8 @@ function overview(x) {
   // hücre dengesi
   if (x.v_min != null) {
     $('o_dv').textContent = f(1000 * (x.v_max - x.v_min), 0);
-    $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)`;
+    $('o_dv_cap').textContent = `Spread across 19 cell groups (${f(x.v_min, 3)} – ${f(x.v_max, 3)} V)` +
+      ((x.psi_b ?? 0) > 0 ? ' · imbalance noted, balancing works at rest' : '');
   } else { $('o_dv').textContent = '—'; $('o_dv_cap').textContent = 'Needs wide telemetry'; }
   // akü sağlığı (kapasite SOH'u, ECU flash'ında kalıcı): D satırının soh'u = gösterilen değer
   $('o_soh').textContent = f(x.soh, 0);
@@ -809,7 +894,6 @@ function overview(x) {
     : x.rest_s > 0 && x.rest_s < REST_S ? `Resting ${Math.floor(x.rest_s / 60)} of ${REST_S / 60} min: a capacity reading is taken at ${REST_S / 60} min`
     : x.soh_n === 0 ? 'Not measured yet: assumed new. Learns between two rests (≥ 30 % charge difference)'
     : `Learned from ${x.soh_n} measurement${x.soh_n > 1 ? 's' : ''}, last ${f(x.soh_ratio, 1)} % · stored in the ECU`;
-  $('o_soh_cap').textContent = ' ';
   // stres indeksi Ψ: sade dille baskın kriter; durum renkleri yalnız durum için, çubuk nötr
   // girişi kaybolan kriter varsa "stres yok" denmez: değer alt sınır, hat kopuksa hiç bilinmiyor
   const ps = x.psi_s, allUnk = s.bad.link;
@@ -876,21 +960,9 @@ async function tests() {
   } catch (e) {}
 }
 
-// güç eğrisi (kW, tek eksen): kullanılan + sürüş ve şarj için izin verilen
-const cPow = mk('c_pow', [['Used', r => r.v_pack == null || r.i_meas == null ? null : r.v_pack * r.i_meas / 1000, C.s1],
-                          ['Allowed (drive)', r => r.v_pack == null ? null : r.v_pack * r.i_allow / 1000, C.s2],
-                          ['Allowed (charge)', r => r.v_pack == null || r.i_chg == null ? null : -r.v_pack * r.i_chg / 1000, C.s3]],
-                { dash: [[], [6, 3], [6, 3]] });
-cPow.options.scales.x.ticks.callback = v => v === 0 ? 'now' : `${Math.round(v)} s`;
-cPow.options.plugins.tooltip.callbacks.title = it => `${Math.abs(it[0].parsed.x).toFixed(0)} s ago`;
-cPow.options.plugins.tooltip.callbacks.label = it => ` ${it.dataset.label}: ${it.parsed.y == null ? '—' : it.parsed.y.toFixed(2)} kW`;
+// grafikler yalnız Technical details açıkken çizilir (Overview'da grafik yok)
 const drawEng = draw;
-draw = function () {
-  if (!buf.length) return;
-  if (!$('eng').hidden) drawEng();
-  const x1 = buf[buf.length - 1].t_ms / 1000, x0 = Math.max(buf[0].t_ms / 1000, x1 - 60);
-  if (!$('ov').hidden) fill(cPow, buf.filter(r => r.t_ms / 1000 >= x0).map(r => ({ ...r, t_ms: r.t_ms - 1000 * x1 })), x0 - x1, 0);
-};
+draw = function () { if (!$('eng').hidden) drawEng(); };
 try { const v = localStorage.getItem('bms_tab'); if (v === 'eng') $('tabs').querySelector('[data-v="eng"]').click(); } catch (e) {}
 
 live(); runs(); link(); tests();

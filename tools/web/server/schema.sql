@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
   soh_c REAL, soh_n INTEGER, efc REAL,               -- kapasite SOH'u: öğrenilen %, ölçüm sayısı, eşdeğer tam çevrim
   soh_anchor INTEGER, rest_s INTEGER, soh_ratio REAL, -- çapa var mı, dinlenme süresi [s], son ölçüm oranı %
   psi_a REAL, psi_b REAL, psi_p REAL, -- yaşlanma hızı, dengesizlik, deşarjı kısan koruma payı Ψ_P
-  r_cyc REAL, r_cal REAL, dmg REAL -- yaşlanma hızı oranları (çevrim, takvim; 1 = 25 °C referansı), birikimli hasar
+  r_cyc REAL, r_cal REAL, dmg REAL, -- yaşlanma hızı oranları (çevrim, takvim; 1 = 25 °C referansı), birikimli hasar
+  v_kmh REAL -- araç hızı (gateway, twin_emu R satırından; ECU telemetrisinde yok)
 );
 CREATE INDEX IF NOT EXISTS telemetry_run ON telemetry (run_id, t_ms);
 

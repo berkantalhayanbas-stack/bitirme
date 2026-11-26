@@ -296,6 +296,9 @@ EV = {0: ("NORMAL: service restart", None, [1], 60),
       6: ("STOP (long): overheating", "STOP (long): heat source removed", [3, 4], 300)}
 ST_NAME = {1: "NORMAL", 2: "DERATE", 3: "LIMP-HOME", 4: "SAFE-STOP"}
 test = None                                             # bekleyen tepki ölçümü
+# araç hızı (twin_emu R satırı, 1 Hz; ECU telemetrisinde hız yok): D satırına v_kmh olarak eklenir (panelin
+# hız / menzil göstergesi). 2,5 s'den eskiyse eklenmez (Uno sustu ya da --emu yok)
+veh = {"kmh": None, "t": 0}
 last_t = 0                                              # son D satırının t_ms'i (olay zamanı için)
 last_st = 0                                             # son D satırındaki ECU durumu
 
@@ -312,6 +315,12 @@ def emu_reader(emu):
             return
         if line:
             elog.write(f"{now_ms()} {line}\n")
+        if line.startswith("R,"):                        # R,<s>,<mod>,<km/h>,<I>,...
+            try:
+                veh["kmh"], veh["t"] = float(line.split(",")[3]), now_ms()
+            except (IndexError, ValueError):
+                pass
+            continue
         if not line.startswith("B,"):
             continue
         try:
@@ -424,6 +433,8 @@ def main():
                             stats["rows_parsed"] += 1
                             uart.row(item, rx)
                             track_reaction(item, rx)
+                            if veh["kmh"] is not None and rx - veh["t"] < 2500:
+                                item["v_kmh"] = veh["kmh"]
                         buf[kind].append(item)
     except KeyboardInterrupt:
         pass
